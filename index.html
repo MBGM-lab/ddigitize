@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ddigitalize: Extract data from images</title>
+  <link rel="icon" type="image/png" href="img/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 10px;
+      background: #eef2f7;
+      color: #222;
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 1.3rem;
+      color: #333;
+    }
+
+    /* ── Error banner ── */
+    #errorBanner {
+      display: none;
+      background: #c0392b;
+      color: #fff;
+      padding: 8px 14px;
+      margin-bottom: 8px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    #errorBanner button {
+      float: right;
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+    }
+
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .toolbar-sep {
+      width: 1px;
+      height: 28px;
+      background: #ddd;
+      margin: 0 4px;
+    }
+
+    .toolbar-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #999;
+      margin-right: 2px;
+      white-space: nowrap;
+    }
+
+    /* ── Buttons ── */
+    button {
+      padding: 5px 11px;
+      font-size: 13px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      color: #333;
+      line-height: 1.4;
+    }
+    button:hover { background: #f0f0f0; border-color: #999; }
+    button:active { background: #e4e4e4; }
+
+    button.btn-primary {
+      background: #2f7fd4;
+      border-color: #2469b3;
+      color: #fff;
+    }
+    button.btn-primary:hover { background: #2469b3; }
+
+    #imageUpload.btn-primary {
+      border-color: #2469b3;
+    }
+    #imageUpload.btn-primary::file-selector-button {
+      background: #2f7fd4;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      padding: 4px 8px;
+      margin-right: 6px;
+    }
+    #imageUpload.btn-primary:hover::file-selector-button { background: #2469b3; }
+
+    button.btn-danger {
+      background: #fff;
+      border-color: #c0392b;
+      color: #c0392b;
+    }
+    button.btn-danger:hover { background: #fdf0ef; }
+
+    /* file input styled like a button */
+    #imageUpload {
+      font-size: 13px;
+      padding: 4px 6px;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      max-width: 180px;
+    }
+
+    /* ── Calibration panel ── */
+    #calibrationPanel {
+      display: none;
+      margin-bottom: 10px;
+      padding: 10px 14px;
+      border: 2px solid #4CAF50;
+      border-radius: 6px;
+      background: #f0f8f0;
+      font-size: 13px;
+    }
+    #calibrationPanel strong { font-size: 14px; }
+    #calibrationInfo { margin-left: 10px; font-style: italic; color: #666; }
+    #calibrationPanel label { margin-right: 8px; }
+    #calibrationPanel input[type=number] { width: 64px; }
+    #calibrationPanel .calib-row { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    #calibrationStatus {
+      display: inline-block;
+      padding: 5px 12px;
+      background: #fffbe6;
+      border: 1px solid #f0d060;
+      color: #7a6000;
+      font-size: 15px;
+      font-weight: bold;
+      border-radius: 5px;
+    }
+
+    /* ── Main layout ── */
+    #mainContainer {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    #canvasSection { flex: 1 1 0; min-width: 0; }
+
+    canvas {
+      display: block;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      background: #fff;
+    }
+
+    #canvasSection.drag-over canvas {
+      outline: 3px dashed #2f7fd4;
+      outline-offset: -3px;
+    }
+
+    /* ── Upload overlay ── */
+    #uploadOverlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+    }
+
+    #uploadOverlay .uo-inner {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      padding: 24px 40px 32px;
+      max-width: 780px;
+      width: 100%;
+      height: 100%;
+    }
+
+    #uploadOverlay .uo-top {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      padding-bottom: 24px;
+    }
+
+    #uploadOverlay .uo-text {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      text-align: left;
+      flex: 1;
+    }
+
+    #uploadOverlay .uo-illustration {
+      display: block;
+      max-width: 220px;
+      max-height: 180px;
+      flex-shrink: 0;
+    }
+
+    #uploadOverlay .uo-title {
+      font-family: 'Nunito', sans-serif;
+      font-size: 3rem;
+      font-weight: 800;
+      color: #2a2a2a;
+      margin: 0 0 6px;
+    }
+
+    #uploadOverlay .uo-sub {
+      font-size: 14px;
+      color: #666;
+      margin: 0;
+    }
+
+
+    #uploadOverlay .uo-drop {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      align-self: start;
+      gap: 8px;
+      border: 2.5px dashed #6a9fd8;
+      border-radius: 14px;
+      padding: 32px 40px;
+      background: #e8f0fb;
+      width: 100%;
+      box-shadow: 0 4px 18px rgba(80,120,180,0.10);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #uploadOverlay .uo-drop:hover {
+      border-color: #3a78c9;
+      background: #dce8f8;
+    }
+
+    #uploadOverlay .uo-drop-icon { font-size: 38px; color: #4a82c4; }
+    #uploadOverlay .uo-drop-main { font-size: 16px; font-weight: 700; color: #2c4a72; margin: 0; }
+    #uploadOverlay .uo-drop-hint { font-size: 12px; color: #7a9cc0; margin: 0; }
+
+    /* ── Sidebar ── */
+    #sidebarSection {
+      width: 240px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .sidebar-card {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .sidebar-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+    }
+
+    /* color + lock row */
+    #styleRow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    #styleRow label { font-size: 13px; display: flex; align-items: center; gap: 4px; }
+
+    /* path list */
+    #pathList {
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .path-item {
+      padding: 5px 6px;
+      margin: 2px 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .path-item:hover { background: #f0f0f0; }
+    .path-item.active { background: #d6e8ff; }
+
+    .color-box {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #888;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .path-item button {
+      margin-left: auto;
+      padding: 1px 6px;
+      font-size: 13px;
+      line-height: 1.2;
+      border-color: #ccc;
+    }
+
+    /* ── Collapsible help ── */
+    #helpToggle {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 13px;
+      color: #2f7fd4;
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #helpToggle:hover { color: #1a5fa0; background: none; border: none; }
+    #helpToggle .arrow { font-size: 10px; transition: transform 0.15s; display: inline-block; }
+    #helpToggle.open .arrow { transform: rotate(90deg); }
+
+    #helpBody {
+      display: none;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #444;
+      line-height: 1.5;
+    }
+    #helpBody ul { margin: 4px 0; padding-left: 16px; }
+    #helpBody li { margin: 3px 0; }
+    #helpBody kbd {
+      background: #eee;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 0 4px;
+      font-size: 11px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="errorBanner">
+    <span id="errorMessage"></span>
+    <button onclick="document.getElementById('errorBanner').style.display='none'">✕</button>
+  </div>
+
+  <h1>ddigitalize</h1>
+
+  <!-- ── Toolbar ── -->
+  <div id="toolbar">
+    <div class="toolbar-group">
+      <span class="toolbar-label">File</span>
+      <input type="file" id="imageUpload" accept="image/*" title="Open an image file to digitize (or drag-and-drop / paste with Ctrl+V)">
+      <button id="toggleImageBtn" style="display:none;" title="Show or hide the background image without removing it">Hide Image</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Draw</span>
+      <button id="newPathBtn" title="Start a new path with a fresh color — useful for tracing multiple curves on the same image">New Path</button>
+      <button id="uploadBtn" title="Fit a smooth Bézier curve through your clicked points. Use the Curve Model selector on the right to constrain the shape (e.g. exponential, sigmoid).">Smooth Curves</button>
+      <button id="straightLineBtn" title="Connect your clicked points with straight line segments instead of curves">Straight Lines</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Axes</span>
+      <button id="calibrateBtn" title="Set real-world axis values by clicking two known points on each axis — needed to export calibrated coordinates">Coordinate System</button>
+      <button id="clearAxesBtn" class="btn-danger" style="display:none;" title="Remove the current coordinate system and revert to raw pixel coordinates">Clear Axes</button>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Export</span>
+      <input type="text" id="exportFilename" value="curves" title="Base filename for exported files (extension added automatically)" style="width:90px; font-size:12px; padding:2px 5px; border:1px solid #ccc; border-radius:3px;">
+      <button id="downloadBtn" title="Export all curves as a JSON file with Bézier control points and sampled (x, y) coordinates">JSON</button>
+      <button id="downloadCsvBtn" title="Export sampled (x, y) coordinates for all curves as a CSV file">CSV</button>
+      <label title="Subtract the first anchor point of each trace from all exported coordinates, making it (0, 0). Individual paths can override this with the ⌖ button in the path list." style="font-size:12px; white-space:nowrap; cursor:pointer;"><input type="checkbox" id="relativeOriginGlobal"> Relative origin</label>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">View</span>
+      <button id="fitBtn" title="Scale and center the image to fill the canvas (Ctrl+0)">Fit</button>
+      <span id="zoomLevel" style="font-size:12px; color:#666; min-width:36px; text-align:right;">100%</span>
+    </div>
+
+    <div class="toolbar-sep"></div>
+
+    <div class="toolbar-group">
+      <button id="resetBtn" class="btn-danger" title="Remove all paths and start over (image is kept)">Remove All</button>
+    </div>
+  </div>
+
+  <!-- ── Calibration panel ── -->
+  <div id="calibrationPanel" style="display:none;">
+    <strong>Coordinate System</strong>
+    <span id="calibrationInfo"></span>
+    <div class="calib-row">
+      <label title="The real-world value at the first point you click on the X-axis">X-axis — P1: <input type="number" id="x1Val" value="0"></label>
+      <label title="The real-world value at the second point you click on the X-axis">P2: <input type="number" id="x2Val" value="1"></label>
+      <button id="setXAxis" title="Click two points on the X-axis of the chart to set the X scale">Set X-axis</button>
+      <input type="color" id="xAxisColor" value="#ff0000" title="X-axis overlay color">
+      <label title="Treat the X axis as logarithmic"><input type="checkbox" id="xLogScale"> Log</label>
+      <label title="Line width in pixels">Width <input type="number" id="axisLineWidth" value="2" min="0.5" max="10" step="0.5" style="width:46px;"></label>
+    </div>
+    <div class="calib-row">
+      <label title="The real-world value at the first point you click on the Y-axis">Y-axis — P1: <input type="number" id="y1Val" value="0"></label>
+      <label title="The real-world value at the second point you click on the Y-axis">P2: <input type="number" id="y2Val" value="1"></label>
+      <button id="setYAxis" title="Click two points on the Y-axis of the chart to set the Y scale">Set Y-axis</button>
+      <input type="color" id="yAxisColor" value="#008800" title="Y-axis overlay color">
+      <label title="Treat the Y axis as logarithmic"><input type="checkbox" id="yLogScale"> Log</label>
+    </div>
+    <div class="calib-row">
+      <button id="doneCalibrate" title="Save the current axis calibration">Done</button>
+      <button id="setOriginBtn" title="Optional: click a point on the image to define (0,0). When set, axis lines act as scale bars — their value span ÷ pixel length gives the scale factor.">Set Origin</button>
+      <button id="resetCalibrate" title="Clear all axis calibration and revert to raw pixel coordinates">Reset to Default</button>
+      <button id="closeCalibrate" title="Close this panel without changing the calibration">Close</button>
+      <label title="Project points onto the actual axis direction, correcting for tilted axis lines">
+        <input type="checkbox" id="ignoreTilt"> Tilted axes
+      </label>
+      <span id="originStatus" style="color:#666; font-size:12px; font-style:italic;"></span>
+      <span id="calibrationStatus"></span>
+    </div>
+  </div>
+
+  <!-- ── Main layout ── -->
+  <div id="mainContainer">
+    <div id="canvasSection" style="position:relative;">
+      <canvas id="plotCanvas"></canvas>
+
+      <!-- Shown when no image is loaded -->
+      <div id="uploadOverlay">
+        <div class="uo-inner">
+          <div class="uo-top">
+            <div class="uo-text">
+              <p class="uo-title">Extract data from scientific figures</p>
+              <p class="uo-sub">Trace curves with smooth Bézier fits — export as JSON or CSV</p>
+            </div>
+            <img class="uo-illustration" id="overlayIllustration"
+                 src="img/illustration.gif" alt=""
+                 onerror="this.style.display='none'">
+          </div>
+          <div class="uo-drop">
+            <span class="uo-drop-icon">⬆</span>
+            <p class="uo-drop-main">Drop an image here</p>
+            <p class="uo-drop-hint">or use the file picker above &middot; paste with Ctrl+V</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="canvasHint" style="display:none; position:absolute; top:5%; left:50%; transform:translate(-50%,-50%); padding:10px 18px; background:rgba(255,251,230,0.92); border:1px solid #f0d060; border-radius:6px; font-size:14px; color:#7a6000; pointer-events:none; white-space:nowrap;">
+        Click on the image to place points along the curve
+      </div>
+    </div>
+
+    <div id="sidebarSection">
+
+      <!-- Style card -->
+      <div class="sidebar-card">
+        <h4>Active Path</h4>
+        <div id="styleRow">
+          <label title="Choose the color for this path">Color <input type="color" id="pathColor" value="#ff0000"></label>
+          <label title="When enabled, dragging one Bézier handle mirrors its length to the opposite handle, keeping a smooth join"><input type="checkbox" id="lockHandleLength"> Lock handles</label>
+        </div>
+      </div>
+
+      <!-- Path list card -->
+      <div class="sidebar-card">
+        <h4>Paths</h4>
+        <div id="pathList"></div>
+      </div>
+
+      <!-- Curve model card -->
+      <div class="sidebar-card">
+        <h4>Curve Model</h4>
+        <select id="curveModel" title="Constrain the curve shape to a known mathematical model — the fit is computed automatically from your points" style="width:100%; font-size:13px; padding:4px 6px; border:1px solid #bbb; border-radius:4px; background:#fff; cursor:pointer;">
+          <option value="free">Free (manual)</option>
+          <option value="single_exp">Single exponential</option>
+          <option value="double_exp">Double exponential</option>
+          <option value="sigmoid">Sigmoid (Boltzmann)</option>
+          <option value="gaussian">Gaussian</option>
+        </select>
+        <div id="modelHint" style="display:none; margin-top:7px; padding:6px 10px; background:#fffbe6; border:1px solid #f0d060; border-radius:4px; font-size:12px; color:#7a6000;"></div>
+      </div>
+
+      <!-- Help card -->
+      <div class="sidebar-card">
+        <button id="helpToggle"><span class="arrow">▶</span> Help</button>
+        <div id="helpBody">
+          <ul>
+            <li>Click to place points (need ≥ 2)</li>
+            <li><kbd>Alt</kbd>+click a point to remove it</li>
+            <li><kbd>Ctrl</kbd>+click near a line to insert a point</li>
+            <li><kbd>Ctrl+Z</kbd> to undo, <kbd>Ctrl+Shift+Z</kbd> / <kbd>Ctrl+Y</kbd> to redo</li>
+            <li>Right-click an anchor to toggle symmetric handles</li>
+            <li>Drag purple control points to adjust curves</li>
+            <li>Scroll to zoom, right-click+drag to pan</li>
+            <li><em>Smooth Curves</em> fits a Bézier chain through your points</li>
+            <li><em>Fit to Image</em> refines the curve to match the underlying image</li>
+            <li><em>New Path</em> starts a new trace with a different color</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+  <script>
+    // Help toggle
+    const helpToggle = document.getElementById('helpToggle');
+    const helpBody   = document.getElementById('helpBody');
+    helpToggle.addEventListener('click', () => {
+      const open = helpBody.style.display === 'block';
+      helpBody.style.display = open ? 'none' : 'block';
+      helpToggle.classList.toggle('open', !open);
+    });
+  </script>
+</body>
+</html>
