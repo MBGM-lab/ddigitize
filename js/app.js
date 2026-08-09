@@ -1004,6 +1004,69 @@ document.getElementById('downloadCsvBtn').addEventListener('click', () => {
   flashButton('downloadCsvBtn', '✓ Downloaded!');
 });
 
+// ── Session load ──────────────────────────────────────────────────────────────
+
+function loadSession(data) {
+  if (!state.uploadedImage) {
+    showError('Load the image first, then load the session JSON.');
+    return;
+  }
+  if (!Array.isArray(data.curves) || data.curves.length === 0) {
+    showError('No curves found in this JSON file.');
+    return;
+  }
+  const hasWork = state.paths.some(p => p.points.length > 0);
+  if (hasWork && !confirm('Replace current paths with the saved session?')) return;
+
+  if (data.coordinate_system) {
+    state.coordinateSystem = data.coordinate_system;
+    updateCalibrationInfo();
+  }
+
+  state.paths = [];
+  data.curves.forEach((c, i) => {
+    state.paths.push({
+      id: i,
+      name: c.name || `Path ${i + 1}`,
+      color: c.color || '#ff0000',
+      points: c.pixel_points || [],
+      segments: c.pixel_segments || [],
+      processed: (c.pixel_segments?.length > 0) || c.line_type === 'straight',
+      lineType: c.line_type || 'none',
+      relativeOrigin: null,
+      modelName: c.model_params?.model || null,
+      extending: false,
+      extendFromIndex: 0,
+    });
+  });
+  state.pathIdCounter = state.paths.length;
+  state.currentPathIndex = 0;
+  document.getElementById('pathColor').value = state.paths[0]?.color || '#ff0000';
+
+  updatePathList();
+  redrawPlotCanvas();
+  updateButtonStates();
+}
+
+document.getElementById('loadSessionBtn').addEventListener('click', () => {
+  document.getElementById('sessionUpload').click();
+});
+
+document.getElementById('sessionUpload').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      loadSession(JSON.parse(ev.target.result));
+    } catch {
+      showError('Could not parse JSON file.');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
 // ── Button: reset ─────────────────────────────────────────────────────────────
 
 document.getElementById('resetBtn').addEventListener('click', () => {
@@ -1042,7 +1105,7 @@ function updateButtonStates() {
 
   // While calibration panel is open: highlight only calibration buttons.
   const toolbarIds = ['imageUpload', 'uploadBtn', 'straightLineBtn',
-                      'newPathBtn', 'calibrateBtn', 'downloadBtn', 'downloadCsvBtn'];
+                      'newPathBtn', 'calibrateBtn', 'downloadBtn', 'downloadCsvBtn', 'loadSessionBtn'];
   const allCalibIds = ['setXAxis', 'setYAxis', 'setOriginBtn', 'doneCalibrate', 'closeCalibrate', 'resetCalibrate'];
   if (calibPanelOpen) {
     toolbarIds.forEach(id => document.getElementById(id).classList.remove('btn-primary'));

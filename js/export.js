@@ -103,7 +103,8 @@ export function collectExportData() {
         xy_values.y = xy_values.y.map(v => round6(v - y0));
       }
 
-      return { ...base, model_params, xy_values, bezier_from_clicks };
+      return { ...base, model_params, xy_values, bezier_from_clicks,
+               pixel_points: path.points, pixel_segments: path.segments };
     }
 
     // ── Free-form / straight / unprocessed path ───────────────────────────
@@ -130,9 +131,11 @@ export function collectExportData() {
       for (let i = 0; i < xPoints.length; i++) { xPoints[i] -= x0; yPoints[i] -= y0; }
     }
 
-    const result = { ...base, xy_values: { x: xPoints, y: yPoints } };
+    const result = { ...base, xy_values: { x: xPoints, y: yPoints },
+                     pixel_points: path.points };
     if (path.lineType === 'smooth' && path.segments.length > 0) {
       result.bezier_path = segmentsToSvgPath(path.segments);
+      result.pixel_segments = path.segments;
     }
     return result;
   });

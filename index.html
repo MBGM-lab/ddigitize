@@ -407,6 +407,8 @@
       <input type="text" id="exportFilename" value="curves" title="Base filename for exported files (extension added automatically)" style="width:90px; font-size:12px; padding:2px 5px; border:1px solid #ccc; border-radius:3px;">
       <button id="downloadBtn" title="Export all curves as a JSON file with Bézier control points and sampled (x, y) coordinates">JSON</button>
       <button id="downloadCsvBtn" title="Export sampled (x, y) coordinates for all curves as a CSV file">CSV</button>
+      <button id="loadSessionBtn" title="Load a previously exported JSON to restore calibration and traced curves">Load session</button>
+      <input type="file" id="sessionUpload" accept=".json" style="display:none">
       <label title="Subtract the first anchor point of each trace from all exported coordinates, making it (0, 0). Individual paths can override this with the ⌖ button in the path list." style="font-size:12px; white-space:nowrap; cursor:pointer;"><input type="checkbox" id="relativeOriginGlobal"> Relative origin</label>
     </div>
 
