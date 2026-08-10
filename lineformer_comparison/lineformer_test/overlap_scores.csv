@@ -1,0 +1,16 @@
+figure,n_curves,n_overlap_events,overlap_score
+single_sigmoid.png,1,0,0.0
+single_expdecay.png,1,0,0.0
+single_alpha.png,1,0,0.0
+two_no_overlap.png,2,0,0.0
+two_partial_overlap.png,2,2,0.0175
+two_heavy_overlap.png,2,1,0.0138
+four_no_overlap.png,4,0,0.0
+four_partial_overlap.png,4,11,0.0306
+four_heavy_overlap.png,4,8,0.0781
+eight_no_overlap.png,8,0,0.0
+eight_partial_overlap.png,8,54,0.0564
+eight_heavy_overlap.png,8,43,0.1883
+twelve_no_overlap.png,12,0,0.0
+twelve_partial_overlap.png,12,127,0.0686
+twelve_heavy_overlap.png,12,98,0.2469
