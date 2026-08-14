@@ -378,7 +378,7 @@ state.plotCanvas.addEventListener('mousedown', e => {
       // In straight-line mode only anchor points (0, 3) are draggable.
       if (path.lineType === 'straight' && cpIndex !== 0 && cpIndex !== 3) return;
       if (Math.hypot(pt.x - coords.x, pt.y - coords.y) < CP_HIT_RADIUS) {
-        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex };
+        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.altKey };
         state.dragOffset.x = pt.x - coords.x;
         state.dragOffset.y = pt.y - coords.y;
         e.preventDefault();
@@ -410,6 +410,7 @@ state.plotCanvas.addEventListener('mousemove', e => {
   const { pathIndex, segIndex, cpIndex } = state.draggingCP;
   const path = state.paths[pathIndex];
   const newPos = { x: coords.x + state.dragOffset.x, y: coords.y + state.dragOffset.y };
+  const oldPos = { ...path.segments[segIndex][cpIndex] };
   path.segments[segIndex][cpIndex] = newPos;
 
   if (path.lineType === 'straight') {
@@ -436,6 +437,18 @@ state.plotCanvas.addEventListener('mousemove', e => {
     // uses the updated position rather than bouncing back to the original click position.
     if (cpIndex === 0) path.points[segIndex] = { ...path.points[segIndex], ...newPos };
     if (cpIndex === 3) path.points[segIndex + 1] = { ...path.points[segIndex + 1], ...newPos };
+    // Alt+drag on an anchor: translate both handles with it to preserve local curve shape.
+    if (state.draggingCP.moveWithHandles) {
+      const dx = newPos.x - oldPos.x, dy = newPos.y - oldPos.y;
+      if (cpIndex === 0) {
+        path.segments[segIndex][1].x += dx; path.segments[segIndex][1].y += dy;
+        if (segIndex > 0) { path.segments[segIndex - 1][2].x += dx; path.segments[segIndex - 1][2].y += dy; }
+      }
+      if (cpIndex === 3) {
+        path.segments[segIndex][2].x += dx; path.segments[segIndex][2].y += dy;
+        if (segIndex < path.segments.length - 1) { path.segments[segIndex + 1][1].x += dx; path.segments[segIndex + 1][1].y += dy; }
+      }
+    }
     applySymmetry(pathIndex, segIndex, cpIndex, newPos);
   }
   redrawPlotCanvas();

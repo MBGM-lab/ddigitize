@@ -25,6 +25,18 @@ export function createNewPath(color = null) {
   return path;
 }
 
+export function duplicatePath(index) {
+  saveState('duplicate_path');
+  const src = state.paths[index];
+  const clone = JSON.parse(JSON.stringify(src));
+  clone.id = state.pathIdCounter++;
+  clone.name = `Path ${state.paths.length + 1}`;
+  state.paths.splice(index + 1, 0, clone);
+  state.currentPathIndex = index + 1;
+  updatePathList();
+  redrawPlotCanvas();
+}
+
 export function getCurrentPath() {
   return state.paths[state.currentPathIndex];
 }
@@ -134,10 +146,20 @@ export function updatePathList() {
       updatePathList();
     };
 
+    const dupBtn = document.createElement('button');
+    dupBtn.textContent = '⧉';
+    dupBtn.title = 'Duplicate this path';
+    dupBtn.style.cssText = 'font-size:13px; padding:0 5px;';
+    dupBtn.onclick = (e) => {
+      e.stopPropagation();
+      duplicatePath(index);
+    };
+
     item.appendChild(colorBox);
     item.appendChild(nameSpan);
     item.appendChild(originBtn);
     item.appendChild(extendBtn);
+    item.appendChild(dupBtn);
     item.appendChild(deleteBtn);
     listDiv.appendChild(item);
   });
@@ -160,6 +182,8 @@ export function saveState(type = 'path_change') {
 
   if (type === 'add_point') {
     delta = { type: 'add_point', pathIndex };
+  } else if (type === 'duplicate_path') {
+    delta = { type: 'duplicate_path', insertedIndex: state.currentPathIndex + 1 };
   } else {
     const p = state.paths[pathIndex];
     delta = { type: 'path_change', pathIndex, pathSnapshot: pathSnapshot(p) };
@@ -188,6 +212,10 @@ export function undo() {
     redoEntry.type = 'add_point_redo';
     redoEntry.pathIndex = delta.pathIndex;
     redoEntry.point = p ? { ...p.points[p.points.length - 1] } : null;
+  } else if (delta.type === 'duplicate_path') {
+    redoEntry.type = 'duplicate_path_redo';
+    redoEntry.insertedIndex = delta.insertedIndex;
+    redoEntry.pathSnapshot = pathSnapshot(state.paths[delta.insertedIndex]);
   } else {
     redoEntry.type = 'path_change';
     redoEntry.pathIndex = delta.pathIndex;
@@ -197,6 +225,8 @@ export function undo() {
 
   if (delta.type === 'add_point') {
     if (p) p.points.pop();
+  } else if (delta.type === 'duplicate_path') {
+    state.paths.splice(delta.insertedIndex, 1);
   } else {
     if (delta.pathIndex < state.paths.length) {
       state.paths[delta.pathIndex] = delta.pathSnapshot;
@@ -225,6 +255,9 @@ export function redo() {
   if (entry.type === 'add_point_redo') {
     undoEntry.type = 'add_point';
     undoEntry.pathIndex = entry.pathIndex;
+  } else if (entry.type === 'duplicate_path_redo') {
+    undoEntry.type = 'duplicate_path';
+    undoEntry.insertedIndex = entry.insertedIndex;
   } else {
     undoEntry.type = 'path_change';
     undoEntry.pathIndex = entry.pathIndex;
@@ -234,6 +267,8 @@ export function redo() {
 
   if (entry.type === 'add_point_redo') {
     if (p && entry.point) p.points.push(entry.point);
+  } else if (entry.type === 'duplicate_path_redo') {
+    state.paths.splice(entry.insertedIndex, 0, entry.pathSnapshot);
   } else {
     if (entry.pathIndex < state.paths.length && entry.pathSnapshot) {
       state.paths[entry.pathIndex] = entry.pathSnapshot;
