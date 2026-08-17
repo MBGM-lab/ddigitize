@@ -1,4 +1,4 @@
-import { state, CP_HIT_RADIUS } from './state.js';
+import { state, CP_HIT_RADIUS, MAX_UNDO_HISTORY } from './state.js';
 import { setupCanvas, redrawPlotCanvas, getAdjustedCoords } from './render.js';
 import { createNewPath, getCurrentPath, updatePathList, saveState, undo, redo } from './paths.js';
 import { fitPathToImage } from './fit.js';
@@ -35,7 +35,19 @@ let resizeTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(
-    () => requestAnimationFrame(() => requestAnimationFrame(() => { setupCanvas(); fitToWindow(); })),
+    () => requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!state.uploadedImage) { setupCanvas(); return; }
+      const dpr = window.devicePixelRatio || 1;
+      const oldW = state.plotCanvas.width / dpr;
+      const oldH = state.plotCanvas.height / dpr;
+      setupCanvas();
+      const newW = state.plotCanvas.width / dpr;
+      const newH = state.plotCanvas.height / dpr;
+      // Preserve zoom; re-centre pan so the image stays centred in the new canvas.
+      state.imageOffset.x += (newW - oldW) / 2;
+      state.imageOffset.y += (newH - oldH) / 2;
+      redrawPlotCanvas();
+    })),
     50
   );
 });
@@ -100,10 +112,17 @@ function handleClick(e) {
     if (closestIndex >= 0) {
       path.points.splice(closestIndex, 1);
       if (path.lineType === 'smooth' && path.segments.length > 0) {
-        if (closestIndex < path.segments.length) path.segments.splice(closestIndex, 1);
-        if (closestIndex > 0 && closestIndex - 1 < path.segments.length) path.segments.splice(closestIndex - 1, 1);
-        if (path.segments.length < path.points.length - 1) {
-          path.processed = false; path.lineType = 'none'; path.segments = [];
+        const prevSeg = closestIndex > 0 ? path.segments[closestIndex - 1] : null;
+        const nextSeg = closestIndex < path.segments.length ? path.segments[closestIndex] : null;
+        if (prevSeg && nextSeg) {
+          // Interior point: merge the two adjacent segments into one, preserving
+          // the outgoing tangent from the left neighbour and incoming tangent to
+          // the right neighbour so the rest of the curve is undisturbed.
+          path.segments.splice(closestIndex - 1, 2,
+            [prevSeg[0], prevSeg[1], nextSeg[2], nextSeg[3]]);
+        } else {
+          // Endpoint: just drop the one adjacent segment.
+          path.segments.splice(prevSeg ? closestIndex - 1 : 0, 1);
         }
       } else if (path.lineType === 'straight') {
         path.segments = [];
@@ -336,7 +355,8 @@ state.plotCanvas.addEventListener('mouseup', e => {
 // ── Mouse: control point dragging ─────────────────────────────────────────────
 
 let didDrag = false;
-state.plotCanvas.addEventListener('mousedown', () => { didDrag = false; });
+let cpDragSnapshot = null;
+state.plotCanvas.addEventListener('mousedown', () => { didDrag = false; cpDragSnapshot = null; });
 
 let draggingCalibPoint = null;
 let draggingOrigin = false;
@@ -378,7 +398,13 @@ state.plotCanvas.addEventListener('mousedown', e => {
       // In straight-line mode only anchor points (0, 3) are draggable.
       if (path.lineType === 'straight' && cpIndex !== 0 && cpIndex !== 3) return;
       if (Math.hypot(pt.x - coords.x, pt.y - coords.y) < CP_HIT_RADIUS) {
-        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.altKey };
+        cpDragSnapshot = {
+          type: 'path_change', pathIndex: state.currentPathIndex,
+          pathSnapshot: JSON.parse(JSON.stringify(path)),
+          currentPathIndex: state.currentPathIndex,
+          pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
+        };
+        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.ctrlKey };
         state.dragOffset.x = pt.x - coords.x;
         state.dragOffset.y = pt.y - coords.y;
         e.preventDefault();
@@ -437,7 +463,7 @@ state.plotCanvas.addEventListener('mousemove', e => {
     // uses the updated position rather than bouncing back to the original click position.
     if (cpIndex === 0) path.points[segIndex] = { ...path.points[segIndex], ...newPos };
     if (cpIndex === 3) path.points[segIndex + 1] = { ...path.points[segIndex + 1], ...newPos };
-    // Alt+drag on an anchor: translate both handles with it to preserve local curve shape.
+    // Ctrl+drag on an anchor: translate both handles with it to preserve local curve shape.
     if (state.draggingCP.moveWithHandles) {
       const dx = newPos.x - oldPos.x, dy = newPos.y - oldPos.y;
       if (cpIndex === 0) {
@@ -455,6 +481,12 @@ state.plotCanvas.addEventListener('mousemove', e => {
 });
 
 state.plotCanvas.addEventListener('mouseup', () => {
+  if (didDrag && cpDragSnapshot) {
+    state.redoHistory = [];
+    state.undoHistory.push(cpDragSnapshot);
+    if (state.undoHistory.length > MAX_UNDO_HISTORY) state.undoHistory.shift();
+  }
+  cpDragSnapshot = null;
   draggingCalibPoint = null;
   draggingOrigin = false;
   state.draggingCP = null;
@@ -1028,19 +1060,20 @@ function loadSession(data) {
     showError('No curves found in this JSON file.');
     return;
   }
-  const hasWork = state.paths.some(p => p.points.length > 0);
-  if (hasWork && !confirm('Replace current paths with the saved session?')) return;
 
   if (data.coordinate_system) {
     state.coordinateSystem = data.coordinate_system;
     updateCalibrationInfo();
   }
 
-  state.paths = [];
-  data.curves.forEach((c, i) => {
+  // Drop empty placeholder paths (e.g. the default initial path) before appending.
+  state.paths = state.paths.filter(p => p.points.length > 0 || p.processed);
+
+  const insertIndex = state.paths.length;
+  data.curves.forEach(c => {
     state.paths.push({
-      id: i,
-      name: c.name || `Path ${i + 1}`,
+      id: state.pathIdCounter++,
+      name: c.name || `Path ${state.pathIdCounter}`,
       color: c.color || '#ff0000',
       points: c.pixel_points || [],
       segments: c.pixel_segments || [],
@@ -1052,9 +1085,8 @@ function loadSession(data) {
       extendFromIndex: 0,
     });
   });
-  state.pathIdCounter = state.paths.length;
-  state.currentPathIndex = 0;
-  document.getElementById('pathColor').value = state.paths[0]?.color || '#ff0000';
+  state.currentPathIndex = insertIndex;
+  document.getElementById('pathColor').value = state.paths[insertIndex]?.color || '#ff0000';
 
   updatePathList();
   redrawPlotCanvas();
