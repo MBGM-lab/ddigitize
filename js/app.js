@@ -65,7 +65,7 @@ function handleClick(e) {
   if (didDrag) { didDrag = false; return; }
   if (!state.uploadedImage) return;
 
-  const coords = getAdjustedCoords(e);
+  const coords = state.precisionMode ? { ...state.precisionCursor } : getAdjustedCoords(e);
 
   if (state.calibrationMode) {
     if (state.calibrationAxis === 'origin') {
@@ -404,9 +404,8 @@ state.plotCanvas.addEventListener('mousedown', e => {
           currentPathIndex: state.currentPathIndex,
           pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
         };
-        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.ctrlKey };
-        state.dragOffset.x = pt.x - coords.x;
-        state.dragOffset.y = pt.y - coords.y;
+        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.ctrlKey,
+                             lastMousePos: { x: coords.x, y: coords.y } };
         e.preventDefault();
       }
     });
@@ -433,10 +432,14 @@ state.plotCanvas.addEventListener('mousemove', e => {
   }
   if (!state.draggingCP) return;
   didDrag = true;
-  const { pathIndex, segIndex, cpIndex } = state.draggingCP;
+  const { pathIndex, segIndex, cpIndex, lastMousePos } = state.draggingCP;
+  const factor = e.shiftKey ? 0.2 : 1.0;
+  const dx = (coords.x - lastMousePos.x) * factor;
+  const dy = (coords.y - lastMousePos.y) * factor;
+  state.draggingCP.lastMousePos = { x: coords.x, y: coords.y };
   const path = state.paths[pathIndex];
-  const newPos = { x: coords.x + state.dragOffset.x, y: coords.y + state.dragOffset.y };
   const oldPos = { ...path.segments[segIndex][cpIndex] };
+  const newPos = { x: oldPos.x + dx, y: oldPos.y + dy };
   path.segments[segIndex][cpIndex] = newPos;
 
   if (path.lineType === 'straight') {
@@ -563,7 +566,15 @@ state.plotCanvas.addEventListener('mouseup', () => updateCursor(null));
 // ── Coordinate readout ────────────────────────────────────────────────────────
 
 state.plotCanvas.addEventListener('mousemove', e => {
-  state.mousePos = getAdjustedCoords(e);
+  const coords = getAdjustedCoords(e);
+  if (state.precisionMode && !state.draggingCP) {
+    const prev = state.mousePos;
+    if (prev) {
+      state.precisionCursor.x += (coords.x - prev.x) * 0.2;
+      state.precisionCursor.y += (coords.y - prev.y) * 0.2;
+    }
+  }
+  state.mousePos = coords;
   redrawPlotCanvas();
 });
 
@@ -1123,7 +1134,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   redrawPlotCanvas();
 });
 
-// ── Keyboard: undo ────────────────────────────────────────────────────────────
+// ── Keyboard: undo / precision mode / arrow nudge ────────────────────────────
 
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -1133,6 +1144,55 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) {
     e.preventDefault();
     redo();
+  }
+
+  // f — toggle precision cursor mode
+  if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {
+    state.precisionMode = !state.precisionMode;
+    if (state.precisionMode && state.mousePos) {
+      state.precisionCursor.x = state.mousePos.x;
+      state.precisionCursor.y = state.mousePos.y;
+    }
+    redrawPlotCanvas();
+    return;
+  }
+
+  // Arrow keys — nudge precision cursor or last placed point
+  // Shift = 10 px, Ctrl+Shift = 0.1 px (sub-pixel fine), plain = 1 px
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    if (e.ctrlKey && !e.shiftKey) return;  // leave plain Ctrl+Arrow to browser/WM
+    const step = (e.ctrlKey && e.shiftKey) ? 0.1 : e.shiftKey ? 10 : 1;
+    const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0;
+    const dy = e.key === 'ArrowDown'  ? step : e.key === 'ArrowUp'   ? -step : 0;
+
+    if (state.precisionMode) {
+      e.preventDefault();
+      state.precisionCursor.x += dx;
+      state.precisionCursor.y += dy;
+      redrawPlotCanvas();
+    } else {
+      const path = getCurrentPath();
+      if (path && path.points.length > 0 && (!path.processed || path.extending)) {
+        e.preventDefault();
+        saveState('path_change');
+        const last = path.points[path.points.length - 1];
+        last.x += dx;
+        last.y += dy;
+        redrawPlotCanvas();
+      }
+    }
+  }
+
+  // Enter — place a point at the precision cursor position
+  if (e.key === 'Enter' && state.precisionMode && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    const path = getCurrentPath();
+    if (path && (!path.processed || path.extending)) {
+      saveState('add_point');
+      path.points.push({ x: state.precisionCursor.x, y: state.precisionCursor.y, symmetric: false });
+      updatePathList();
+      redrawPlotCanvas();
+    }
   }
 });
 

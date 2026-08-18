@@ -175,6 +175,27 @@ export function redrawPlotCanvas() {
     }
   }
 
+  if (state.precisionMode) {
+    const { x, y } = state.precisionCursor;
+    const arm = 12 / imageScale;
+    const gap =  3 / imageScale;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(220,50,50,0.95)';
+    ctx.lineWidth = 1.5 / imageScale;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x - arm, y); ctx.lineTo(x - gap, y);
+    ctx.moveTo(x + gap, y); ctx.lineTo(x + arm, y);
+    ctx.moveTo(x, y - arm); ctx.lineTo(x, y - gap);
+    ctx.moveTo(x, y + gap); ctx.lineTo(x, y + arm);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(220,50,50,0.8)';
+    ctx.beginPath();
+    ctx.arc(x, y, 2 / imageScale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.restore();
 
   if (state.zoomRect) {

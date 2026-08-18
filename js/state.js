@@ -31,6 +31,9 @@ export const state = {
 
   mousePos: null,
 
+  precisionMode: false,
+  precisionCursor: { x: 0, y: 0 },
+
   plotCanvas: null,
   plotCtx: null,
 };
