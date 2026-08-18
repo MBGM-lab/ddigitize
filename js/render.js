@@ -175,6 +175,23 @@ export function redrawPlotCanvas() {
     }
   }
 
+  // Highlight ring around the Tab-selected / nearest control point.
+  if (state.hoveredCP) {
+    const { pathIndex, segIndex, cpIndex } = state.hoveredCP;
+    const hPath = paths[pathIndex];
+    const hPt   = hPath?.segments[segIndex]?.[cpIndex];
+    if (hPt) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 210, 0, 0.95)';
+      ctx.lineWidth = 2 / imageScale;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(hPt.x, hPt.y, 10 / imageScale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   if (state.precisionMode) {
     const { x, y } = state.precisionCursor;
     const arm = 12 / imageScale;

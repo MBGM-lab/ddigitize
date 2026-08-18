@@ -253,10 +253,29 @@ document.addEventListener('keydown', e => {
 // ── Zoom rectangle (Shift+drag) ───────────────────────────────────────────────
 
 state.plotCanvas.addEventListener('mousedown', e => {
-  if (e.button !== 0 || !e.shiftKey) return;
+  if (e.button !== 0 || !e.shiftKey || e.ctrlKey) return;  // Ctrl+Shift reserved for path drag
   const rect = state.plotCanvas.getBoundingClientRect();
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   state.zoomRect = { x1: x, y1: y, x2: x, y2: y };
+  e.preventDefault();
+});
+
+// ── Whole-path drag (Ctrl+Shift+drag) ────────────────────────────────────────
+
+let pathDragSnapshot = null;
+state.plotCanvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || !e.shiftKey || !e.ctrlKey) return;
+  if (!state.uploadedImage) return;
+  const path = getCurrentPath();
+  if (!path || (path.points.length === 0 && !path.processed)) return;
+  const coords = getAdjustedCoords(e);
+  pathDragSnapshot = {
+    type: 'path_change', pathIndex: state.currentPathIndex,
+    pathSnapshot: JSON.parse(JSON.stringify(path)),
+    currentPathIndex: state.currentPathIndex,
+    pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
+  };
+  state.draggingPath = { pathIndex: state.currentPathIndex, lastMousePos: { x: coords.x, y: coords.y } };
   e.preventDefault();
 });
 
@@ -352,6 +371,23 @@ state.plotCanvas.addEventListener('mouseup', e => {
   if (e.button === 2) state.panning = false;
 });
 
+// ── Nearby-CP helper (screen-pixel hit radius) ───────────────────────────────
+
+function getNearbyCP(coords) {
+  const path = getCurrentPath();
+  if (!path?.segments.length) return [];
+  const hitR = CP_HIT_RADIUS / state.imageScale;
+  const results = [];
+  path.segments.forEach((segment, segIndex) => {
+    segment.forEach((pt, cpIndex) => {
+      if (path.lineType === 'straight' && cpIndex !== 0 && cpIndex !== 3) return;
+      const d = Math.hypot(pt.x - coords.x, pt.y - coords.y);
+      if (d < hitR) results.push({ pathIndex: state.currentPathIndex, segIndex, cpIndex, dist: d });
+    });
+  });
+  return results.sort((a, b) => a.dist - b.dist);
+}
+
 // ── Mouse: control point dragging ─────────────────────────────────────────────
 
 let didDrag = false;
@@ -393,23 +429,37 @@ state.plotCanvas.addEventListener('mousedown', e => {
 
   const path = getCurrentPath();
   if (!path.segments.length) return;
-  path.segments.forEach((segment, segIndex) => {
-    segment.forEach((pt, cpIndex) => {
-      // In straight-line mode only anchor points (0, 3) are draggable.
-      if (path.lineType === 'straight' && cpIndex !== 0 && cpIndex !== 3) return;
-      if (Math.hypot(pt.x - coords.x, pt.y - coords.y) < CP_HIT_RADIUS) {
-        cpDragSnapshot = {
-          type: 'path_change', pathIndex: state.currentPathIndex,
-          pathSnapshot: JSON.parse(JSON.stringify(path)),
-          currentPathIndex: state.currentPathIndex,
-          pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
-        };
-        state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.ctrlKey,
-                             lastMousePos: { x: coords.x, y: coords.y } };
-        e.preventDefault();
-      }
+  const hitR = CP_HIT_RADIUS / state.imageScale;
+
+  // Prefer the Tab-pre-selected CP if it is still within range; otherwise pick closest.
+  let target = null;
+  const hov = state.hoveredCP;
+  if (hov && hov.pathIndex === state.currentPathIndex) {
+    const pt = path.segments[hov.segIndex]?.[hov.cpIndex];
+    if (pt && Math.hypot(pt.x - coords.x, pt.y - coords.y) < hitR) target = hov;
+  }
+  if (!target) {
+    let minDist = hitR;
+    path.segments.forEach((segment, segIndex) => {
+      segment.forEach((pt, cpIndex) => {
+        if (path.lineType === 'straight' && cpIndex !== 0 && cpIndex !== 3) return;
+        const d = Math.hypot(pt.x - coords.x, pt.y - coords.y);
+        if (d < minDist) { minDist = d; target = { pathIndex: state.currentPathIndex, segIndex, cpIndex }; }
+      });
     });
-  });
+  }
+  if (target) {
+    const { segIndex, cpIndex } = target;
+    cpDragSnapshot = {
+      type: 'path_change', pathIndex: state.currentPathIndex,
+      pathSnapshot: JSON.parse(JSON.stringify(path)),
+      currentPathIndex: state.currentPathIndex,
+      pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
+    };
+    state.draggingCP = { pathIndex: state.currentPathIndex, segIndex, cpIndex, moveWithHandles: e.ctrlKey,
+                         lastMousePos: { x: coords.x, y: coords.y } };
+    e.preventDefault();
+  }
 });
 
 state.plotCanvas.addEventListener('mousemove', e => {
@@ -427,6 +477,17 @@ state.plotCanvas.addEventListener('mousemove', e => {
     if (state.coordinateSystem) state.coordinateSystem.origin = { ...origin };
     document.getElementById('originStatus').textContent =
       `Origin ✓ (${Math.round(coords.x)}, ${Math.round(coords.y)}) px`;
+    redrawPlotCanvas();
+    return;
+  }
+  if (state.draggingPath) {
+    didDrag = true;
+    const { pathIndex, lastMousePos } = state.draggingPath;
+    const dx = coords.x - lastMousePos.x, dy = coords.y - lastMousePos.y;
+    state.draggingPath.lastMousePos = { x: coords.x, y: coords.y };
+    const p = state.paths[pathIndex];
+    p.points.forEach(pt => { pt.x += dx; pt.y += dy; });
+    p.segments.forEach(seg => seg.forEach(pt => { pt.x += dx; pt.y += dy; }));
     redrawPlotCanvas();
     return;
   }
@@ -489,10 +550,17 @@ state.plotCanvas.addEventListener('mouseup', () => {
     state.undoHistory.push(cpDragSnapshot);
     if (state.undoHistory.length > MAX_UNDO_HISTORY) state.undoHistory.shift();
   }
+  if (didDrag && pathDragSnapshot) {
+    state.redoHistory = [];
+    state.undoHistory.push(pathDragSnapshot);
+    if (state.undoHistory.length > MAX_UNDO_HISTORY) state.undoHistory.shift();
+  }
   cpDragSnapshot = null;
+  pathDragSnapshot = null;
   draggingCalibPoint = null;
   draggingOrigin = false;
   state.draggingCP = null;
+  state.draggingPath = null;
 });
 
 // ── Cursor management ─────────────────────────────────────────────────────────
@@ -501,6 +569,7 @@ function updateCursor(e) {
   const canvas = state.plotCanvas;
 
   if (state.zoomRect) { canvas.style.cursor = 'crosshair'; return; }
+  if (state.draggingPath) { canvas.style.cursor = 'move'; return; }
   if (state.panning || state.draggingCP || draggingCalibPoint !== null || draggingOrigin) {
     canvas.style.cursor = 'grabbing';
     return;
@@ -575,11 +644,19 @@ state.plotCanvas.addEventListener('mousemove', e => {
     }
   }
   state.mousePos = coords;
+  // Keep hoveredCP tracking nearest CP; preserve Tab selection while it stays in range.
+  if (!state.draggingCP) {
+    const nearby = getNearbyCP(coords);
+    const cur = state.hoveredCP;
+    const tabStillNear = cur && nearby.some(n => n.segIndex === cur.segIndex && n.cpIndex === cur.cpIndex);
+    state.hoveredCP = tabStillNear ? cur : (nearby[0] ?? null);
+  }
   redrawPlotCanvas();
 });
 
 state.plotCanvas.addEventListener('mouseleave', () => {
   state.mousePos = null;
+  state.hoveredCP = null;
   redrawPlotCanvas();
 });
 
@@ -1144,6 +1221,20 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) {
     e.preventDefault();
     redo();
+  }
+
+  // Tab — cycle through control points within hit range of the cursor
+  if (e.key === 'Tab' && state.mousePos && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    const nearby = getNearbyCP(state.mousePos);
+    if (nearby.length > 1) {
+      const cur = state.hoveredCP;
+      const curIdx = cur ? nearby.findIndex(n => n.segIndex === cur.segIndex && n.cpIndex === cur.cpIndex) : -1;
+      const next = nearby[(curIdx + 1) % nearby.length];
+      state.hoveredCP = next;
+      redrawPlotCanvas();
+    }
+    return;
   }
 
   // f — toggle precision cursor mode

@@ -34,6 +34,9 @@ export const state = {
   precisionMode: false,
   precisionCursor: { x: 0, y: 0 },
 
+  hoveredCP: null,
+  draggingPath: null,
+
   plotCanvas: null,
   plotCtx: null,
 };
