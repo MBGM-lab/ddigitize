@@ -314,8 +314,14 @@ state.plotCanvas.addEventListener('mouseup', e => {
 
 state.plotCanvas.addEventListener('wheel', e => {
   e.preventDefault();
+  const rect = state.plotCanvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
   const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-  state.imageScale = Math.max(0.05, Math.min(40,state.imageScale * zoomFactor));
+  const newScale = Math.max(0.05, Math.min(40, state.imageScale * zoomFactor));
+  state.imageOffset.x = mouseX - (mouseX - state.imageOffset.x) * (newScale / state.imageScale);
+  state.imageOffset.y = mouseY - (mouseY - state.imageOffset.y) * (newScale / state.imageScale);
+  state.imageScale = newScale;
   updateZoomDisplay();
   redrawPlotCanvas();
 });
