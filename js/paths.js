@@ -33,6 +33,7 @@ export function duplicatePath(index) {
   clone.name = `Path ${state.paths.length + 1}`;
   state.paths.splice(index + 1, 0, clone);
   state.currentPathIndex = index + 1;
+  document.getElementById('pathColor').value = clone.color;
   updatePathList();
   redrawPlotCanvas();
 }
@@ -106,6 +107,8 @@ export function updatePathList() {
           });
           state.pathIdCounter = state.paths.length;
         }
+        const active = state.paths[state.currentPathIndex];
+        if (active) document.getElementById('pathColor').value = active.color;
         updatePathList();
         redrawPlotCanvas();
       }

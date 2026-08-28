@@ -5,6 +5,7 @@ import { fitPathToImage } from './fit.js';
 import { computeBezierChain } from './bezier.js';
 import { fitModel, sampleFit } from './model_fit.js';
 import { collectExportData, triggerDownload } from './export.js';
+import { sampleTraceColor, traceLineFollow, curvatureDecimate } from './autoTrace.js';
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,25 @@ function handleClick(e) {
     return;
   }
 
+  // ── Auto-trace two-click mode ─────────────────────────────────────────────
+  if (state.lineFollowMode) {
+    if (!state.lineFollowStart || state.lineFollowDone) {
+      // First click (or clicking again after a completed trace → new start).
+      state.lineFollowEnd  = null;
+      state.lineFollowDone = false;
+      state.lineFollowLastPathIndex = -1;
+      state.lineFollowStart = coords;
+      state.lineFollowColor = sampleTraceColor(
+        Math.round(coords.x), Math.round(coords.y), state.imagePixelData);
+      redrawPlotCanvas();
+      updateButtonStates();
+    } else {
+      runRawTrace(coords);
+    }
+    e.preventDefault();
+    return;
+  }
+
   const path = getCurrentPath();
 
   // Alt+Click: remove closest point
@@ -153,7 +173,7 @@ function handleClick(e) {
     const hitRadius = 20 / state.imageScale;
     if (bestInsertIndex >= 0 && minDist < hitRadius) {
       saveState();
-      path.points.splice(bestInsertIndex, 0, { x: coords.x, y: coords.y, symmetric: false });
+      path.points.splice(bestInsertIndex, 0, { x: coords.x, y: coords.y, symmetric: false, corner: false });
       if (path.lineType === 'straight') {
         path.segments = [];
         for (let i = 0; i < path.points.length - 1; i++) {
@@ -187,7 +207,7 @@ function handleClick(e) {
 
   if (path.processed && !path.extending) return;
   saveState('add_point');
-  path.points.push({ x: coords.x, y: coords.y, symmetric: false });
+  path.points.push({ x: coords.x, y: coords.y, symmetric: false, corner: false });
   document.getElementById('canvasHint').style.display = 'none';
   updatePathList();
   redrawPlotCanvas();
@@ -244,11 +264,167 @@ function fitToWindow() {
   redrawPlotCanvas();
 }
 
+function setTracePanel(visible) {
+  const panel = document.getElementById('traceParamsPanel');
+  panel.style.display = visible ? 'block' : 'none';
+  // Panel open/close changes the canvas section's top position, so re-measure.
+  requestAnimationFrame(() => { setupCanvas(); redrawPlotCanvas(); });
+}
+
 document.getElementById('fitBtn').addEventListener('click', fitToWindow);
 
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); fitToWindow(); }
+// ── Auto-trace mode ───────────────────────────────────────────────────────────
+
+// Shared helper: run the trace from start→end, fit a path, enter done state.
+// If pathToReplace is given, overwrites that path object instead of creating one.
+// Step 1: run the raw line-follower and store the dense point array.
+// Displays result as a straight-line polyline so the user can verify tracking.
+function runRawTrace(endCoords, pathToReplace = null) {
+  const stepSize   = Math.max(1, parseInt(document.getElementById('traceStep').value,  10) || 1);
+  const searchBand = Math.max(5, parseInt(document.getElementById('traceBand').value,  10) || 30);
+  const rawPts = traceLineFollow(
+    state.lineFollowStart, endCoords, state.imagePixelData, state.lineFollowColor, { stepSize, searchBand });
+  if (rawPts.length < 2) return;
+
+  saveState('path_change');
+  let path;
+  if (pathToReplace) {
+    path = pathToReplace;
+    state.currentPathIndex = state.paths.indexOf(path);
+  } else {
+    const current = getCurrentPath();
+    path = (!current || current.points.length === 0) ? current ?? createNewPath() : createNewPath();
+  }
+  path.points   = rawPts.map(p => ({ x: p.x, y: p.y, corner: false, symmetric: true, handleIn: null, handleOut: null }));
+  path.segments = computeBezierChain(path.points);
+  path.lineType = 'straight';
+  path.processed = true;
+  path.extending = false;
+  path.extendFromIndex = 0;
+  path.modelName = null;
+  updatePathList();
+
+  state.lineFollowRawPts = rawPts;
+  state.lineFollowEnd    = endCoords;
+  state.lineFollowDone   = true;
+  state.lineFollowLastPathIndex = state.currentPathIndex;
+  state.lineFollowMode   = false;
+  const _btn = document.getElementById('autoTraceBtn');
+  if (_btn) _btn.classList.remove('btn-active');
+  state.plotCanvas.style.cursor = '';
+  redrawPlotCanvas();
+  updateButtonStates();
+}
+
+// Step 2: decimate the stored raw trace into peak/trough anchors and fit a Bézier.
+function extractPeaks() {
+  if (!state.lineFollowRawPts || state.lineFollowRawPts.length < 2) return;
+  const minDist      = Math.max(3, parseInt(document.getElementById('traceSpacing').value, 10) || 25);
+  const smoothWindow = Math.max(1, parseInt(document.getElementById('traceSmooth').value,  10) || 9);
+  const pts = curvatureDecimate(state.lineFollowRawPts, { minDist, smoothWindow }, state.lineFollowStart, state.lineFollowEnd);
+  if (pts.length < 2) return;
+
+  saveState('path_change');
+  const path = getCurrentPath() ?? createNewPath();
+  path.points = pts.map(p => ({ x: p.x, y: p.y, corner: false, peak: true, symmetric: true, handleIn: null, handleOut: null }));
+  path.segments = [];
+  for (let i = 0; i < path.points.length - 1; i++) {
+    const a = path.points[i], b = path.points[i + 1];
+    path.segments.push([a, a, b, b]);
+  }
+  path.lineType = 'straight';
+  path.processed = false;
+  path.extending = false;
+  path.extendFromIndex = 0;
+  path.modelName = null;
+  updatePathList();
+  redrawPlotCanvas();
+  updateButtonStates();
+}
+
+function exitLineFollowMode() {
+  state.lineFollowMode   = false;
+  state.lineFollowStart  = null;
+  state.lineFollowEnd    = null;
+  state.lineFollowColor  = null;
+  state.lineFollowDone   = false;
+  state.lineFollowLastPathIndex = -1;
+  state.lineFollowRawPts = null;
+  const btn = document.getElementById('autoTraceBtn');
+  if (btn) btn.classList.remove('btn-active');
+  setTracePanel(false);
+  state.plotCanvas.style.cursor = '';
+  redrawPlotCanvas();
+  updateButtonStates();
+}
+
+document.getElementById('autoTraceBtn').addEventListener('click', () => {
+  if (!state.uploadedImage) return;
+  state.lineFollowMode   = !state.lineFollowMode;
+  state.lineFollowStart  = null;
+  state.lineFollowEnd    = null;
+  state.lineFollowColor  = null;
+  state.lineFollowDone   = false;
+  state.lineFollowLastPathIndex = -1;
+  state.lineFollowRawPts = null;
+  setTracePanel(state.lineFollowMode);
+  const btn = document.getElementById('autoTraceBtn');
+  btn.classList.toggle('btn-active', state.lineFollowMode);
+  state.plotCanvas.style.cursor = state.lineFollowMode ? 'crosshair' : '';
+  redrawPlotCanvas();
+  updateButtonStates();
 });
+
+document.getElementById('traceRerunBtn').addEventListener('click', () => {
+  if (!state.lineFollowStart || !state.lineFollowEnd || !state.lineFollowColor) return;
+  const pathIdx = state.lineFollowLastPathIndex;
+  const pathToReplace = (pathIdx >= 0 && pathIdx < state.paths.length)
+    ? state.paths[pathIdx] : null;
+  runRawTrace(state.lineFollowEnd, pathToReplace);
+});
+
+document.getElementById('traceExtractBtn').addEventListener('click', () => {
+  extractPeaks();
+});
+
+document.getElementById('closeTraceParams').addEventListener('click', () => {
+  exitLineFollowMode();
+  setTracePanel(false);
+});
+
+// ── Auto-trace slider wiring ──────────────────────────────────────────────────
+
+// Link each slider↔number pair and trigger recompute when either changes.
+function linkTraceSlider(sliderId, numberId, onchange) {
+  const slider = document.getElementById(sliderId);
+  const number = document.getElementById(numberId);
+  slider.addEventListener('input', () => { number.value = slider.value; onchange(); });
+  number.addEventListener('input', () => { slider.value = number.value; onchange(); });
+}
+
+let _rawTimer = null;
+function scheduleRawRetrace() {
+  clearTimeout(_rawTimer);
+  _rawTimer = setTimeout(() => {
+    if (!state.lineFollowDone || !state.lineFollowStart || !state.lineFollowEnd) return;
+    const pathIdx = state.lineFollowLastPathIndex;
+    const pathToReplace = (pathIdx >= 0 && pathIdx < state.paths.length) ? state.paths[pathIdx] : null;
+    runRawTrace(state.lineFollowEnd, pathToReplace);
+  }, 400);
+}
+
+let _peakTimer = null;
+function scheduleExtract() {
+  clearTimeout(_peakTimer);
+  _peakTimer = setTimeout(() => {
+    if (state.lineFollowRawPts) extractPeaks();
+  }, 150);
+}
+
+linkTraceSlider('traceStepSlider',    'traceStep',    scheduleRawRetrace);
+linkTraceSlider('traceBandSlider',    'traceBand',    scheduleRawRetrace);
+linkTraceSlider('traceSpacingSlider', 'traceSpacing', scheduleExtract);
+linkTraceSlider('traceSmoothSlider',  'traceSmooth',  scheduleExtract);
 
 // ── Zoom rectangle (Shift+drag) ───────────────────────────────────────────────
 
@@ -400,6 +576,39 @@ let didDrag = false;
 let cpDragSnapshot = null;
 state.plotCanvas.addEventListener('mousedown', () => { didDrag = false; cpDragSnapshot = null; });
 
+// ── Corner handle dragging (during anchor placement) ──────────────────────────
+
+let cornerHandleDrag = null; // { pointIndex, type: 'in'|'out' }
+let chDragSnapshot   = null;
+
+state.plotCanvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || e.shiftKey) return;
+  const path = getCurrentPath();
+  if (!path || (path.processed && !path.extending)) return;
+  const coords = getAdjustedCoords(e);
+  const hitR   = 8 / state.imageScale;
+  for (let i = 0; i < path.points.length; i++) {
+    const pt = path.points[i];
+    if (!pt.corner) continue;
+    for (const type of ['out', 'in']) {
+      const h = type === 'out' ? pt.handleOut : pt.handleIn;
+      if (!h) continue;
+      if (Math.hypot(pt.x + h.dx - coords.x, pt.y + h.dy - coords.y) < hitR) {
+        chDragSnapshot = {
+          type: 'path_change', pathIndex: state.currentPathIndex,
+          pathSnapshot: JSON.parse(JSON.stringify(path)),
+          currentPathIndex: state.currentPathIndex,
+          pathIdCounter: state.pathIdCounter, colorIndex: state.colorIndex,
+        };
+        cornerHandleDrag = { pointIndex: i, type };
+        didDrag = true; // prevent click from adding a point
+        e.preventDefault();
+        return;
+      }
+    }
+  }
+});
+
 let draggingCalibPoint = null;
 let draggingOrigin = false;
 
@@ -470,6 +679,17 @@ state.plotCanvas.addEventListener('mousedown', e => {
 
 state.plotCanvas.addEventListener('mousemove', e => {
   const coords = getAdjustedCoords(e);
+  if (cornerHandleDrag) {
+    didDrag = true;
+    const pt = getCurrentPath()?.points[cornerHandleDrag.pointIndex];
+    if (pt) {
+      const h = { dx: coords.x - pt.x, dy: coords.y - pt.y };
+      if (cornerHandleDrag.type === 'out') pt.handleOut = h;
+      else pt.handleIn = h;
+      redrawPlotCanvas();
+    }
+    return;
+  }
   if (draggingCalibPoint !== null) {
     didDrag = true;
     state.calibrationPoints[draggingCalibPoint] = { x: coords.x, y: coords.y };
@@ -561,12 +781,19 @@ state.plotCanvas.addEventListener('mouseup', () => {
     state.undoHistory.push(pathDragSnapshot);
     if (state.undoHistory.length > MAX_UNDO_HISTORY) state.undoHistory.shift();
   }
+  if (didDrag && chDragSnapshot) {
+    state.redoHistory = [];
+    state.undoHistory.push(chDragSnapshot);
+    if (state.undoHistory.length > MAX_UNDO_HISTORY) state.undoHistory.shift();
+  }
   cpDragSnapshot = null;
   pathDragSnapshot = null;
+  chDragSnapshot = null;
   draggingCalibPoint = null;
   draggingOrigin = false;
   state.draggingCP = null;
   state.draggingPath = null;
+  cornerHandleDrag = null;
 });
 
 // ── Cursor management ─────────────────────────────────────────────────────────
@@ -721,8 +948,7 @@ document.getElementById('toggleImageBtn').addEventListener('click', () => {
 
 // ── Image loading ─────────────────────────────────────────────────────────────
 
-function loadImageFile(file) {
-  if (!file || !file.type.startsWith('image/')) return;
+function applyImageFile(file, keepPaths) {
   const reader = new FileReader();
   reader.onload = event => {
     state.uploadedImage = new Image();
@@ -730,10 +956,12 @@ function loadImageFile(file) {
       state.imageScale = 1;
       state.imageOffset.x = 0;
       state.imageOffset.y = 0;
-      state.paths = [];
-      state.pathIdCounter = 0;
-      createNewPath('#ff0000');
-      state.colorIndex = 1;
+      if (!keepPaths) {
+        state.paths = [];
+        state.pathIdCounter = 0;
+        createNewPath('#ff0000');
+        state.colorIndex = 1;
+      }
       state.imageVisible = true;
       document.getElementById('toggleImageBtn').style.display = 'inline-block';
       document.getElementById('uploadOverlay').style.display = 'none';
@@ -765,6 +993,30 @@ function loadImageFile(file) {
     state.uploadedImage.src = event.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+function loadImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  if (!state.uploadedImage) { applyImageFile(file, false); return; }
+  // Show the three-button modal.
+  const modal = document.getElementById('replaceImageModal');
+  modal.classList.add('open');
+  const cleanup = choice => {
+    modal.classList.remove('open');
+    keepBtn.removeEventListener('click', onKeep);
+    clearBtn.removeEventListener('click', onClear);
+    cancelBtn.removeEventListener('click', onCancel);
+    if (choice !== null) applyImageFile(file, choice);
+  };
+  const keepBtn   = document.getElementById('replaceKeepPaths');
+  const clearBtn  = document.getElementById('replaceClearPaths');
+  const cancelBtn = document.getElementById('replaceCancel');
+  const onKeep   = () => cleanup(true);
+  const onClear  = () => cleanup(false);
+  const onCancel = () => cleanup(null);
+  keepBtn.addEventListener('click',   onKeep);
+  clearBtn.addEventListener('click',  onClear);
+  cancelBtn.addEventListener('click', onCancel);
 }
 
 document.getElementById('imageUpload').addEventListener('change', e => {
@@ -1052,10 +1304,10 @@ document.getElementById('uploadBtn').addEventListener('click', () => {
   const newSegs = computeBezierChain(pointsForServer);
   if (partialFit) {
     path.segments = [...path.segments.slice(0, path.extendFromIndex - 1), ...newSegs];
-    for (let i = path.extendFromIndex; i < path.points.length - 1; i++) path.points[i].symmetric = true;
+    for (let i = path.extendFromIndex; i < path.points.length - 1; i++) { if (!path.points[i].corner) path.points[i].symmetric = true; }
   } else {
     path.segments = newSegs;
-    for (let i = 1; i < path.points.length - 1; i++) path.points[i].symmetric = true;
+    for (let i = 1; i < path.points.length - 1; i++) { if (!path.points[i].corner) path.points[i].symmetric = true; }
   }
   path.processed = true;
   path.extending = false;
@@ -1220,6 +1472,8 @@ document.getElementById('resetBtn').addEventListener('click', () => {
 // ── Keyboard: undo / precision mode / arrow nudge ────────────────────────────
 
 document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); fitToWindow(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'o') { e.preventDefault(); document.getElementById('imageUpload').click(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
     e.preventDefault();
     undo();
@@ -1244,6 +1498,11 @@ document.addEventListener('keydown', e => {
   }
 
   // f — toggle precision cursor mode
+  if (e.key === 'Escape' && state.lineFollowMode) {
+    exitLineFollowMode();
+    return;
+  }
+
   if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {
     state.precisionMode = !state.precisionMode;
     if (state.precisionMode && state.mousePos) {
@@ -1286,8 +1545,41 @@ document.addEventListener('keydown', e => {
     const path = getCurrentPath();
     if (path && (!path.processed || path.extending)) {
       saveState('add_point');
-      path.points.push({ x: state.precisionCursor.x, y: state.precisionCursor.y, symmetric: false });
+      path.points.push({ x: state.precisionCursor.x, y: state.precisionCursor.y, symmetric: false, corner: false });
       updatePathList();
+      redrawPlotCanvas();
+    }
+  }
+
+  // c — toggle corner flag on the last placed anchor (during placement only)
+  if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey) {
+    const path = getCurrentPath();
+    if (path && (!path.processed || path.extending) && path.points.length > 0) {
+      e.preventDefault();
+      saveState('path_change');
+      const last = path.points[path.points.length - 1];
+      last.corner = !last.corner;
+      if (last.corner) {
+        last.symmetric = false;
+        // Initialise handles from the chord to the previous anchor so the user
+        // sees them immediately and can drag to the desired direction.
+        const prev = path.points.length >= 2 ? path.points[path.points.length - 2] : null;
+        const DEFAULT_LEN = 30 / state.imageScale;
+        if (prev) {
+          const dx = last.x - prev.x, dy = last.y - prev.y;
+          const len = Math.hypot(dx, dy);
+          const hLen = len > 0 ? Math.min(len / 3, DEFAULT_LEN) : DEFAULT_LEN;
+          const ux = len > 0 ? dx / len : 1, uy = len > 0 ? dy / len : 0;
+          last.handleIn  = { dx: -ux * hLen, dy: -uy * hLen }; // toward prev
+          last.handleOut = { dx:  ux * hLen, dy:  uy * hLen }; // away from prev
+        } else {
+          last.handleIn  = { dx: -DEFAULT_LEN, dy: 0 };
+          last.handleOut = { dx:  DEFAULT_LEN, dy: 0 };
+        }
+      } else {
+        last.handleIn = null;
+        last.handleOut = null;
+      }
       redrawPlotCanvas();
     }
   }
@@ -1299,14 +1591,26 @@ function updateButtonStates() {
   const path = getCurrentPath();
   const calibPanelOpen = document.getElementById('calibrationPanel').style.display !== 'none';
 
-  const showHint = !!state.uploadedImage && !!path && path.points.length === 0 && !calibPanelOpen;
-  const minPtsHint = MODEL_INFO[state.curveModel]?.minPoints ?? 2;
-  document.getElementById('canvasHint').textContent =
-    `Click on the image to place points along the curve (need ≥ ${minPtsHint})`;
+  let showHint = false, hintText = '';
+  if (!calibPanelOpen && !!state.uploadedImage) {
+    if (state.lineFollowMode) {
+      showHint = true;
+      hintText = state.lineFollowDone
+        ? 'Adjust params and click Re-run, or click anywhere to start a new trace — Escape to exit'
+        : state.lineFollowStart
+          ? 'Now click the end of the trace — the tool will follow the curve automatically'
+          : 'Click the start of the trace on the image';
+    } else if (path && path.points.length === 0) {
+      showHint = true;
+      const minPtsHint = MODEL_INFO[state.curveModel]?.minPoints ?? 2;
+      hintText = `Click on the image to place points along the curve (need ≥ ${minPtsHint})`;
+    }
+  }
+  document.getElementById('canvasHint').textContent = hintText;
   document.getElementById('canvasHint').style.display = showHint ? 'block' : 'none';
 
   // While calibration panel is open: highlight only calibration buttons.
-  const toolbarIds = ['imageUpload', 'uploadBtn', 'straightLineBtn',
+  const toolbarIds = ['imageUpload', 'uploadBtn', 'straightLineBtn', 'autoTraceBtn',
                       'newPathBtn', 'calibrateBtn', 'downloadBtn', 'downloadCsvBtn', 'loadSessionBtn'];
   const allCalibIds = ['setXAxis', 'setYAxis', 'setOriginBtn', 'doneCalibrate', 'closeCalibrate', 'resetCalibrate'];
   if (calibPanelOpen) {
@@ -1346,6 +1650,10 @@ function updateButtonStates() {
   document.getElementById('clearAxesBtn').style.display = isCalibrated ? 'inline-block' : 'none';
   document.getElementById('downloadBtn').classList.toggle('btn-primary', hasProcessed);
   document.getElementById('downloadCsvBtn').classList.toggle('btn-primary', hasProcessed);
+  // Auto-trace: blue when image loaded and not already active (active state is green via btn-active).
+  document.getElementById('autoTraceBtn').classList.toggle('btn-primary', !!state.uploadedImage && !state.lineFollowMode);
+  document.getElementById('traceRerunBtn').style.display    = state.lineFollowDone ? '' : 'none';
+  document.getElementById('traceExtractBtn').style.display  = state.lineFollowRawPts ? '' : 'none';
   updateCursor(null);
 }
 

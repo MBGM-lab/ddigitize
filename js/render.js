@@ -44,9 +44,44 @@ export function redrawPlotCanvas() {
     ctx.fillStyle = isActive ? 'blue' : path.color;
 
     if (!path.processed || path.extending) {
+      // Draw corner anchor handles (arms + dots) underneath the anchor dots.
       path.points.forEach(pt => {
+        if (!pt.corner) return;
+        const drawHandle = h => {
+          if (!h) return;
+          const hx = pt.x + h.dx, hy = pt.y + h.dy;
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(hx, hy);
+          ctx.strokeStyle = 'gray';
+          ctx.lineWidth = 1 / imageScale;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(hx, hy, 4 / imageScale, 0, Math.PI * 2);
+          ctx.fillStyle = 'purple';
+          ctx.fill();
+        };
+        drawHandle(pt.handleIn);
+        drawHandle(pt.handleOut);
+      });
+
+      // Draw anchor dots on top.
+      path.points.forEach(pt => {
+        const r = 5 / imageScale;
+        ctx.fillStyle = isActive ? 'blue' : path.color;
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 5 / imageScale, 0, Math.PI * 2);
+        if (pt.corner) {
+          ctx.rect(pt.x - r, pt.y - r, 2 * r, 2 * r);
+        } else if (pt.peak) {
+          // Diamond — visually distinct from smooth (circle) and corner (square)
+          ctx.moveTo(pt.x,     pt.y - r);
+          ctx.lineTo(pt.x + r, pt.y    );
+          ctx.lineTo(pt.x,     pt.y + r);
+          ctx.lineTo(pt.x - r, pt.y    );
+          ctx.closePath();
+        } else {
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+        }
         ctx.fill();
       });
     }
@@ -69,9 +104,25 @@ export function redrawPlotCanvas() {
           segment.forEach((pt, cpIndex) => {
             // In straight-line mode handles (cp1, cp2) overlap the anchors — skip them.
             if (isStraight && (cpIndex === 1 || cpIndex === 2)) return;
+            const isAnchor = cpIndex === 0 || cpIndex === 3;
+            const ptIndex  = cpIndex === 0 ? segIndex : segIndex + 1;
+            const srcPt    = path.points[ptIndex];
+            const isCorner = isAnchor && srcPt?.corner;
+            const isPeak   = isAnchor && srcPt?.peak;
+            const r = 6 / imageScale;
             ctx.beginPath();
-            ctx.fillStyle = (cpIndex === 0 || cpIndex === 3) ? 'blue' : 'purple';
-            ctx.arc(pt.x, pt.y, 6 / imageScale, 0, Math.PI * 2);
+            ctx.fillStyle = isAnchor ? 'blue' : 'purple';
+            if (isCorner) {
+              ctx.rect(pt.x - r, pt.y - r, 2 * r, 2 * r);
+            } else if (isPeak) {
+              ctx.moveTo(pt.x,     pt.y - r);
+              ctx.lineTo(pt.x + r, pt.y    );
+              ctx.lineTo(pt.x,     pt.y + r);
+              ctx.lineTo(pt.x - r, pt.y    );
+              ctx.closePath();
+            } else {
+              ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+            }
             ctx.fill();
 
             if (cpIndex === 0 && path.points[segIndex]?.symmetric) {
@@ -210,6 +261,51 @@ export function redrawPlotCanvas() {
     ctx.beginPath();
     ctx.arc(x, y, 2 / imageScale, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Auto-trace end marker (shown when trace is done, re-run available) ───
+  if (state.lineFollowMode && state.lineFollowEnd) {
+    const { x, y } = state.lineFollowEnd;
+    const r = 8 / imageScale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ee6600';
+    ctx.lineWidth = 2 / imageScale;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5 / imageScale, 0, Math.PI * 2);
+    ctx.fillStyle = '#ee6600';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Auto-trace start marker ───────────────────────────────────────────────
+  if (state.lineFollowMode && state.lineFollowStart) {
+    const { x, y } = state.lineFollowStart;
+    const r = 8 / imageScale;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = '#00cc44';
+    ctx.lineWidth = 2 / imageScale;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5 / imageScale, 0, Math.PI * 2);
+    ctx.fillStyle = '#00cc44';
+    ctx.fill();
+    if (state.lineFollowColor) {
+      const { r: cr, g: cg, b: cb } = state.lineFollowColor;
+      const swatchSize = 10 / imageScale;
+      ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1 / imageScale;
+      ctx.beginPath();
+      ctx.rect(x + r + 2 / imageScale, y - swatchSize / 2, swatchSize, swatchSize);
+      ctx.fill();
+      ctx.stroke();
+    }
     ctx.restore();
   }
 

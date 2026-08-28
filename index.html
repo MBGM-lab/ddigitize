@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ddigitalize: Extract data from images</title>
+  <title>ddigitize: Extract data from images</title>
   <link rel="icon" type="image/png" href="img/icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap" rel="stylesheet">
@@ -120,6 +120,13 @@
     }
     button.btn-danger:hover { background: #fdf0ef; }
 
+    button.btn-active {
+      background: #00aa44;
+      color: #fff;
+      border-color: #00aa44;
+    }
+    button.btn-active:hover { background: #009938; }
+
     /* file input styled like a button */
     #imageUpload {
       font-size: 13px;
@@ -130,6 +137,22 @@
       cursor: pointer;
       max-width: 180px;
     }
+
+    /* ── Auto-trace params panel ── */
+    #traceParamsPanel {
+      display: none;
+      margin-bottom: 10px;
+      padding: 10px 14px;
+      border: 2px solid #e07020;
+      border-radius: 6px;
+      background: #fff8f0;
+      font-size: 13px;
+    }
+    #traceParamsPanel strong { font-size: 14px; }
+    #traceParamsPanel label { margin-right: 6px; display: flex; align-items: center; gap: 4px; }
+    #traceParamsPanel input[type=number] { width: 44px; }
+    #traceParamsPanel input[type=range]  { width: 110px; }
+    #traceParamsPanel .calib-row { margin-top: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
     /* ── Calibration panel ── */
     #calibrationPanel {
@@ -364,6 +387,28 @@
       font-size: 11px;
       font-family: monospace;
     }
+    /* ── Image-replace modal ── */
+    #replaceImageModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    #replaceImageModal.open { display: flex; }
+    #replaceImageModal .modal-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px 24px;
+      max-width: 360px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+      font-size: 14px;
+    }
+    #replaceImageModal .modal-box p { margin: 0 0 16px; }
+    #replaceImageModal .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -373,7 +418,7 @@
     <button onclick="document.getElementById('errorBanner').style.display='none'">✕</button>
   </div>
 
-  <h1>ddigitalize</h1>
+  <h1>ddigitize</h1>
 
   <!-- ── Toolbar ── -->
   <div id="toolbar">
@@ -506,19 +551,6 @@
         <div id="pathList"></div>
       </div>
 
-      <!-- Curve model card -->
-      <div class="sidebar-card">
-        <h4>Curve Model</h4>
-        <select id="curveModel" title="Constrain the curve shape to a known mathematical model — the fit is computed automatically from your points" style="width:100%; font-size:13px; padding:4px 6px; border:1px solid #bbb; border-radius:4px; background:#fff; cursor:pointer;">
-          <option value="free">Free (manual)</option>
-          <option value="single_exp">Single exponential</option>
-          <option value="double_exp">Double exponential</option>
-          <option value="sigmoid">Sigmoid (Boltzmann)</option>
-          <option value="gaussian">Gaussian</option>
-        </select>
-        <div id="modelHint" style="display:none; margin-top:7px; padding:6px 10px; background:#fffbe6; border:1px solid #f0d060; border-radius:4px; font-size:12px; color:#7a6000;"></div>
-      </div>
-
       <!-- Help card -->
       <div class="sidebar-card">
         <button id="helpToggle"><span class="arrow">▶</span> Help</button>
@@ -552,5 +584,17 @@
       helpToggle.classList.toggle('open', !open);
     });
   </script>
+
+  <!-- ── Image-replace modal ── -->
+  <div id="replaceImageModal">
+    <div class="modal-box">
+      <p>An image is already loaded. What would you like to do?</p>
+      <div class="modal-actions">
+        <button id="replaceKeepPaths">Replace — keep paths</button>
+        <button id="replaceClearPaths" class="btn-danger">Replace — clear paths</button>
+        <button id="replaceCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

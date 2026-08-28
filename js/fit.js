@@ -224,6 +224,7 @@ export function fitPathToImage(path) {
   // regression in anything that currently works well.
   function fitModelBasedPath() {
     const snappedPoints = path.points.map(pt => {
+      if (pt.corner) return { ...pt }; // corner anchors stay at their placed position
       const closest = findClosestMatchingPixel(pt.x, pt.y, 15, true); // findCenter=true: snap to stroke middle
       return closest.found ? { ...pt, x: closest.x, y: closest.y } : { ...pt };
     });
@@ -307,6 +308,7 @@ export function fitPathToImage(path) {
     // finds no targets, leaving the handle pointing in the wrong direction.
     function snapAnchors(snapRadius = 15) {
       path.points.forEach((pt, ptIndex) => {
+        if (pt.corner) return; // corner anchors stay at their placed position
         const closest = findClosestMatchingPixel(pt.x, pt.y, snapRadius, true);
         if (!closest.found) return;
         const dx = closest.x - pt.x, dy = closest.y - pt.y;
@@ -347,11 +349,31 @@ export function fitPathToImage(path) {
           gradientPass(segment, B1, B2, targetPoints, pass.learningRate, pass.iterations);
         }
 
+        // Project B1/B2 onto the user-set handle directions (angle locked, length free).
+        const h1 = path.points[segIndex]?.handleOut;
+        if (h1) {
+          const hLen = Math.hypot(h1.dx, h1.dy);
+          if (hLen > 0) {
+            const anc = segment[0], dX = h1.dx / hLen, dY = h1.dy / hLen;
+            const proj = Math.max(0, (B1.x - anc.x) * dX + (B1.y - anc.y) * dY);
+            B1.x = anc.x + dX * proj; B1.y = anc.y + dY * proj;
+          }
+        }
+        const h2 = path.points[segIndex + 1]?.handleIn;
+        if (h2) {
+          const hLen = Math.hypot(h2.dx, h2.dy);
+          if (hLen > 0) {
+            const anc = segment[3], dX = h2.dx / hLen, dY = h2.dy / hLen;
+            const proj = Math.max(0, (B2.x - anc.x) * dX + (B2.y - anc.y) * dY);
+            B2.x = anc.x + dX * proj; B2.y = anc.y + dY * proj;
+          }
+        }
+
         segment[1] = B1;
         segment[2] = B2;
 
-        // Enforce symmetry at internal anchor joins
-        if (segIndex > 0) {
+        // Enforce C1 symmetry at smooth (non-corner) anchor joins only.
+        if (segIndex > 0 && !path.points[segIndex]?.corner) {
           const prevSegment = path.segments[segIndex - 1];
           const anchor = segment[0];
           const dx = B1.x - anchor.x; const dy = B1.y - anchor.y;
@@ -364,7 +386,7 @@ export function fitPathToImage(path) {
             prevSegment[2].y = anchor.y + Math.sin(mirrorAngle) * prevDist;
           }
         }
-        if (segIndex < path.segments.length - 1) {
+        if (segIndex < path.segments.length - 1 && !path.points[segIndex + 1]?.corner) {
           const nextSegment = path.segments[segIndex + 1];
           const anchor = segment[3];
           const dx = B2.x - anchor.x; const dy = B2.y - anchor.y;
@@ -383,12 +405,30 @@ export function fitPathToImage(path) {
     }
 
     // Final tight refinement pass after all rounds.
-    path.segments.forEach(segment => {
+    path.segments.forEach((segment, segIndex) => {
       let B1 = { ...segment[1] };
       let B2 = { ...segment[2] };
       const targetPoints = sampleTargets(segment, B1, B2, 5);
       if (targetPoints.length >= 5) {
         gradientPass(segment, B1, B2, targetPoints, 0.05, 20);
+        const h1 = path.points[segIndex]?.handleOut;
+        if (h1) {
+          const hLen = Math.hypot(h1.dx, h1.dy);
+          if (hLen > 0) {
+            const anc = segment[0], dX = h1.dx / hLen, dY = h1.dy / hLen;
+            const proj = Math.max(0, (B1.x - anc.x) * dX + (B1.y - anc.y) * dY);
+            B1.x = anc.x + dX * proj; B1.y = anc.y + dY * proj;
+          }
+        }
+        const h2 = path.points[segIndex + 1]?.handleIn;
+        if (h2) {
+          const hLen = Math.hypot(h2.dx, h2.dy);
+          if (hLen > 0) {
+            const anc = segment[3], dX = h2.dx / hLen, dY = h2.dy / hLen;
+            const proj = Math.max(0, (B2.x - anc.x) * dX + (B2.y - anc.y) * dY);
+            B2.x = anc.x + dX * proj; B2.y = anc.y + dY * proj;
+          }
+        }
         segment[1] = B1;
         segment[2] = B2;
       }

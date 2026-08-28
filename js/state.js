@@ -37,6 +37,14 @@ export const state = {
   hoveredCP: null,
   draggingPath: null,
 
+  lineFollowMode: false,
+  lineFollowStart: null,
+  lineFollowEnd: null,
+  lineFollowColor: null,
+  lineFollowDone: false,
+  lineFollowLastPathIndex: -1,
+  lineFollowRawPts: null,
+
   plotCanvas: null,
   plotCtx: null,
 };
