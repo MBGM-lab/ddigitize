@@ -55,12 +55,12 @@ On macOS, substitute `Cmd` for `Ctrl`.
 ## Tips
 
 - **Calibrate before placing points** to verify accuracy in real units as you click.
-- **Fewer, well-placed points beat a dense grid** — 4–6 anchors at peaks, inflections, and endpoints outperform 20 evenly-spaced clicks.
+- **Fewer, well-placed points beat a dense grid** — a few anchors at peaks, inflections, and endpoints outperform many evenly-spaced clicks (sometimes two is enough).
 - **Zoom in** (`Shift+drag`) before placing anchors near closely spaced features.
 - **Use `Ctrl+Click`** to insert a point on a poorly fitting segment without disturbing the rest of the curve.
 - **Light-on-dark traces**: the fitting algorithm targets dark pixels; invert the image externally before loading for bright curves.
 - **Duplicate paths** (`⧉` button) to reuse a fitted shape for a family of similar curves.
-- **Save regularly** — the browser holds all state in memory; export JSON after each fitting step.
+- **Save regularly** — the browser holds all state in memory. Export JSON after each fitting step; reload it on top of the same image at any time to resume exactly where you left off, or share the file with a collaborator so they can inspect, extend, or correct the traced curves.
 
 ## Export formats
 
