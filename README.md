@@ -2,6 +2,8 @@
 
 A browser-based tool for extracting numerical data from scientific figures using smooth cubic Bézier curves. No installation required — runs entirely in the browser with all computation client-side.
 
+**[Launch app](https://gitr.sys.kth.se/pages/MBGM-lab/ddigitize/)**
+
 ## Motivation
 
 A large volume of scientific data exists only as graphs in published literature. Most existing digitization tools recover discrete summary statistics or piecewise-linear point sequences. **ddigitize** instead represents curves as $C^1$-continuous cubic Bézier chains: users place a few anchor points and the tool fits a smooth, kink-free curve through them, which can be fine-tuned interactively.
