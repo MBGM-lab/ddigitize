@@ -1,125 +1,126 @@
+#!/usr/bin/env python3
 """
-Render the LineFormer tracing-quality heatmap (quality_heatmap.png).
-
-Reads quality_scores.csv produced by run_quality.py and writes a three-panel
-heatmap: one panel per visual style (BW Dashed / BW Solid / Color).
-
-Each cell shows:
-  bold   -- kinked lines / total detected  (numerator = detection count)
-  small  -- kinks per line  (turns >45° summed over all lines / n_detected)
-
-Usage:
-  python make_quality_plot.py \\
-      [--input  lineformer_results/quality_scores.csv] \\
-      [--output lineformer_results/plots]
+Scatter plot: kinks_per_line (x) vs mean_csr (y)
+Compares the existing kink-count metric with the new Curvature Spike Ratio.
+Color = overlap type (3 levels, slots 1-3 from validated palette).
+Shape = figure set (bw / bw_solid / color).
+Output: lineformer_results/quality_scatter.png  (300 dpi)
 """
-
-import argparse
-import csv
-import os
-
+import csv, os
+import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
-SETS       = ['bw', 'bw_solid', 'color']
-SET_LABELS = {'bw': 'BW Dashed', 'bw_solid': 'BW Solid', 'color': 'Color'}
-COUNTS     = [2, 4, 8, 12]
-OVERLAPS   = ['none', 'partial', 'heavy']
-OV_LABELS  = {'none': 'A', 'partial': 'B', 'heavy': 'C'}
+CSV  = '/home/HDD-drive/Repos/lineformer_results/quality_scores.csv'
+OUT  = '/home/HDD-drive/Repos/lineformer_results/quality_scatter.png'
 
+# ── Palette (slots 1-3, all-pairs validated light mode) ───────────────────────
+OVERLAP_COLOR = {
+    'none':    '#2a78d6',   # slot 1 blue
+    'partial': '#eb6834',   # slot 2 orange
+    'heavy':   '#1baf7a',   # slot 3 aqua
+}
+OVERLAP_LABEL = {
+    'none':    'No overlap',
+    'partial': 'Partial overlap',
+    'heavy':   'Heavy overlap',
+}
+SET_MARKER = {
+    'bw':       ('o', 'BW dashed'),
+    'bw_solid': ('s', 'BW solid'),
+    'color':    ('D', 'Color'),
+}
 
-def load_csv(path):
-    data = {s: {n: {o: None for o in OVERLAPS} for n in COUNTS} for s in SETS}
-    with open(path) as f:
-        for row in csv.DictReader(f):
-            s, n, ov = row['set'], int(row['n_expected']), row['overlap']
-            if n in COUNTS:
-                data[s][n][ov] = {
-                    'n_detected':     int(row['n_detected']),
-                    'n_kinked':       int(row['n_kinked']),
-                    'kinks_per_line': float(row['kinks_per_line']),
-                }
-    return data
+# ── Load data ─────────────────────────────────────────────────────────────────
+rows = []
+with open(CSV) as f:
+    for r in csv.DictReader(f):
+        rows.append({
+            'set':            r['set'],
+            'overlap':        r['overlap'],
+            'n_expected':     int(r['n_expected']),
+            'kinks_per_line': float(r['kinks_per_line']),
+            'mean_csr':       float(r['mean_csr']),
+        })
 
+# ── Figure ────────────────────────────────────────────────────────────────────
+fig, ax = plt.subplots(figsize=(7.5, 5.5), dpi=300)
+fig.patch.set_facecolor('#fcfcfb')
+ax.set_facecolor('#fcfcfb')
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--input', default='lineformer_results/quality_scores.csv',
-                        help='Input CSV from run_quality.py '
-                             '(default: lineformer_results/quality_scores.csv)')
-    parser.add_argument('--output', default='lineformer_results/plots',
-                        help='Output directory (default: lineformer_results/plots)')
-    args = parser.parse_args()
+# Gridlines — hairline, recessive
+ax.grid(True, color='#e1e0d9', linewidth=0.6, zorder=0)
+ax.set_axisbelow(True)
 
-    data = load_csv(args.input)
+# Reference lines (approximate threshold boundaries)
+ax.axhline(6,   color='#c3c2b7', lw=1.0, ls='--', zorder=1)
+ax.axvline(0.5, color='#c3c2b7', lw=1.0, ls='--', zorder=1)
+ax.text(0.52, 15.8, 'kinks > 0.5', fontsize=7.5, color='#898781', va='top')
+ax.text(3.65, 6.25, 'CSR > 6',    fontsize=7.5, color='#898781', va='bottom')
 
-    plt.rcParams.update({'font.family': 'sans-serif'})
-    kink_cmap = mcolors.LinearSegmentedColormap.from_list(
-        'kink', ['#f5f7fa', '#fdd0a2', '#e34948'])
+# Plot points
+for row in rows:
+    c   = OVERLAP_COLOR[row['overlap']]
+    mkr, _ = SET_MARKER[row['set']]
+    ax.scatter(row['kinks_per_line'], row['mean_csr'],
+               marker=mkr, s=60, color=c,
+               edgecolors='white', linewidths=1.2, zorder=4)
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.4), sharey=True,
-                             gridspec_kw={'right': 0.91})
-    fig.patch.set_facecolor('white')
-    cbar_ax = fig.add_axes([0.93, 0.18, 0.020, 0.62])
+# Jitter annotation for a few key outliers
+ANNOTATE = [
+    # (set, overlap, n_expected, label_text, dx, dy)
+    ('bw_solid', 'partial', 4,  'bw_solid\n4 curves', -0.55, 1.5),
+    ('bw_solid', 'partial', 8,  'bw_solid\n8 curves',  0.05, 1.0),
+    ('bw',       'partial', 8,  'bw 8 curves',         0.05, 0.8),
+]
+for s, ov, ne, lbl, dx, dy in ANNOTATE:
+    pts = [r for r in rows if r['set']==s and r['overlap']==ov and r['n_expected']==ne]
+    if pts:
+        px, py = pts[0]['kinks_per_line'], pts[0]['mean_csr']
+        ax.annotate(lbl, xy=(px, py), xytext=(px+dx, py+dy),
+                    fontsize=7, color='#52514e',
+                    arrowprops=dict(arrowstyle='-', color='#c3c2b7', lw=0.8))
 
-    for ax, set_key in zip(axes, SETS):
-        angle_mat = np.full((len(OVERLAPS), len(COUNTS)), np.nan)
-        for i, ov in enumerate(OVERLAPS):
-            for j, n in enumerate(COUNTS):
-                d = data[set_key][n][ov]
-                if d is not None:
-                    angle_mat[i, j] = d['kinks_per_line']
+# ── Spines ────────────────────────────────────────────────────────────────────
+for sp in ['top', 'right']:
+    ax.spines[sp].set_visible(False)
+ax.spines['left'].set_color('#c3c2b7')
+ax.spines['bottom'].set_color('#c3c2b7')
+ax.tick_params(color='#c3c2b7', labelcolor='#52514e', labelsize=8.5)
 
-        im = ax.imshow(angle_mat, cmap=kink_cmap, vmin=0, vmax=6, aspect='auto')
+ax.set_xlabel('Kinks per line  (existing metric)', fontsize=9.5, color='#0b0b0b', labelpad=6)
+ax.set_ylabel('Mean CSR  (new metric)',            fontsize=9.5, color='#0b0b0b', labelpad=6)
+ax.set_xlim(-0.15, 4.0)
+ax.set_ylim(0, 17)
 
-        for i in range(len(OVERLAPS)):
-            for j in range(len(COUNTS)):
-                d = data[set_key][COUNTS[j]][OVERLAPS[i]]
-                if d is None:
-                    continue
-                ax.text(j, i, f"{d['n_kinked']}/{d['n_detected']}",
-                        ha='center', va='center',
-                        fontsize=10, color='#0c1117', fontweight='bold')
-                ax.text(j, i + 0.32, f"{d['kinks_per_line']:.1f}",
-                        ha='center', va='center',
-                        fontsize=7.5, color='#0c1117', alpha=0.85)
+# ── Legend — two groups ───────────────────────────────────────────────────────
+overlap_handles = [
+    Line2D([0],[0], marker='o', color='w', markerfacecolor=OVERLAP_COLOR[k],
+           markeredgecolor='white', markersize=8, label=OVERLAP_LABEL[k])
+    for k in ['none', 'partial', 'heavy']
+]
+set_handles = [
+    Line2D([0],[0], marker=m, color='w', markerfacecolor='#52514e',
+           markeredgecolor='white', markersize=7, label=lbl)
+    for m, lbl in [('o','BW dashed'), ('s','BW solid'), ('D','Color')]
+]
 
-        ax.set_xticks(range(len(COUNTS)))
-        ax.set_xticklabels([str(n) for n in COUNTS], fontsize=9)
-        ax.set_xlabel('Expected curves', fontsize=9, labelpad=4)
-        ax.set_title(SET_LABELS[set_key], fontsize=11, fontweight='600',
-                     pad=7, loc='left')
+leg1 = ax.legend(handles=overlap_handles, title='Overlap', title_fontsize=8,
+                 fontsize=8, loc='upper left',
+                 frameon=True, framealpha=0.95, edgecolor='#e1e0d9',
+                 handletextpad=0.5, labelspacing=0.4)
+ax.add_artist(leg1)
+ax.legend(handles=set_handles, title='Figure set', title_fontsize=8,
+          fontsize=8, loc='upper center',
+          frameon=True, framealpha=0.95, edgecolor='#e1e0d9',
+          handletextpad=0.5, labelspacing=0.4)
 
-        if ax is axes[0]:
-            ax.set_yticks(range(len(OVERLAPS)))
-            ax.set_yticklabels([OV_LABELS[o] for o in OVERLAPS],
-                               fontsize=11, fontweight='bold')
+ax.set_title('Kink count vs Curvature Spike Ratio across all test figures',
+             fontsize=10, color='#0b0b0b', pad=10, loc='left')
 
-        for i in range(len(OVERLAPS)):
-            for j in range(len(COUNTS)):
-                ax.add_patch(plt.Rectangle(
-                    (j - 0.5, i - 0.5), 1, 1,
-                    fill=False, edgecolor='white', linewidth=1.5))
-
-    cb = fig.colorbar(im, cax=cbar_ax)
-    cb.set_label('Kinks per line\n(turns >45°)', fontsize=8)
-    cb.ax.tick_params(labelsize=8)
-    fig.suptitle(
-        'Tracing quality: kinked lines / total detected  '
-        '(value = kinks per line, threshold 45°)',
-        fontsize=9, y=1.02, x=0.45)
-
-    plt.tight_layout()
-    os.makedirs(args.output, exist_ok=True)
-    out = os.path.join(args.output, 'quality_heatmap.png')
-    fig.savefig(out, format='png', bbox_inches='tight', dpi=150)
-    plt.close()
-    print(f'Saved: {out}')
-
-
-if __name__ == '__main__':
-    main()
+plt.tight_layout()
+plt.savefig(OUT, dpi=300, bbox_inches='tight', facecolor='#fcfcfb')
+print(f'Saved: {OUT}')

@@ -1,62 +1,64 @@
 """
-Run LineFormer inference on all synthetic test figures and compute kink metrics.
+For each test image, run LineFormer and compute per-line quality scores:
 
-For each detected line the script subsamples the trace every STEP pixels and
-measures the turning angle at each interior keypoint.  A line is flagged as
-kinked when any angle exceeds KINK_THRESH degrees.  Per-figure totals are
-written to a CSV that feeds make_quality_plot.py.
+  Kink score (existing):
+    - subsample the interpolated trace every STEP pixels
+    - compute the turning angle at each interior keypoint
+    - flag a line as kinked if any angle exceeds ANGLE_THRESH degrees
 
-Usage:
-  python run_quality.py \\
-      --lineformer /path/to/LineFormer \\
-      --checkpoint /path/to/iter_3000.pth \\
-      --input  lineformer_test \\
-      --output lineformer_results/quality_scores.csv \\
-      [--save-tracings lineformer_results]
+  Curvature Spike Ratio (CSR, new):
+    - compute turning angles θᵢ at every keypoint (same subsampling)
+    - compute angular acceleration aᵢ = |θᵢ₊₁ − θᵢ₋₁| / 2
+    - CSR = max(aᵢ) / (median(aᵢ) + ε)
+    - smooth curves → CSR ≈ 1–5; stitched traces → CSR >> 10
 
-The optional --save-tracings argument saves annotated PNG images under
-  <dir>/{color,bw,bw_solid}/<figure>.png
-which are needed by make_pdf_overview.py.
+Output: quality_scores.csv
 """
 
-import argparse
-import csv
-import math
-import os
-import sys
+import sys, os, csv, math, json
+sys.path.insert(0, os.path.dirname(__file__))
 
-import cv2
 import numpy as np
 
+# Load pre-computed trace JSONs saved by run_batch_black.py
+TRACES_DIR = "/home/HDD-drive/Repos/lineformer_results_black"
+OUTPUT_CSV = "/home/HDD-drive/Repos/lineformer_results/quality_scores.csv"
 
-STEP         = 10   # keypoint subsample interval (pixels)
-ANGLE_THRESH = 45   # degrees — binary kinked/clean flag
-KINK_THRESH  = 45   # degrees — per-line kink count
+STEP        = 10   # subsample interval (matches mask_kp_sample_interval)
+ANGLE_THRESH = 45  # degrees — used for binary kinked/clean classification
+KINK_THRESH  = 45  # degrees — used for counting individual kink events
 
+# Test figures (exclude singles which have 1 curve, no overlap variant)
 SETS = ['bw', 'bw_solid', 'color']
 FIGURES = [
-    ('two_no_overlap',         2,  'none'),
-    ('two_partial_overlap',    2,  'partial'),
-    ('two_heavy_overlap',      2,  'heavy'),
-    ('four_no_overlap',        4,  'none'),
-    ('four_partial_overlap',   4,  'partial'),
-    ('four_heavy_overlap',     4,  'heavy'),
-    ('eight_no_overlap',       8,  'none'),
-    ('eight_partial_overlap',  8,  'partial'),
-    ('eight_heavy_overlap',    8,  'heavy'),
-    ('twelve_no_overlap',      12, 'none'),
-    ('twelve_partial_overlap', 12, 'partial'),
-    ('twelve_heavy_overlap',   12, 'heavy'),
+    ('two_no_overlap',      2, 'none'),
+    ('two_partial_overlap', 2, 'partial'),
+    ('two_heavy_overlap',   2, 'heavy'),
+    ('four_no_overlap',     4, 'none'),
+    ('four_partial_overlap',4, 'partial'),
+    ('four_heavy_overlap',  4, 'heavy'),
+    ('eight_no_overlap',    8, 'none'),
+    ('eight_partial_overlap',8,'partial'),
+    ('eight_heavy_overlap', 8, 'heavy'),
+    ('twelve_no_overlap',   12,'none'),
+    ('twelve_partial_overlap',12,'partial'),
+    ('twelve_heavy_overlap',12,'heavy'),
 ]
 
 
 def turning_angles(ds):
+    """Given a dataseries [{x,y},...], return list of turning angles (degrees) at interior keypoints."""
     xs = np.array([pt['x'] for pt in ds])
     ys = np.array([pt['y'] for pt in ds])
+
+    # Subsample at STEP intervals to get the effective keypoints
     idx = np.arange(0, len(xs), STEP)
     if len(idx) < 3:
         return []
-    kx, ky = xs[idx], ys[idx]
+
+    kx = xs[idx]
+    ky = ys[idx]
+
     angles = []
     for i in range(1, len(kx) - 1):
         v1 = np.array([kx[i] - kx[i-1], ky[i] - ky[i-1]], dtype=float)
@@ -69,95 +71,83 @@ def turning_angles(ds):
     return angles
 
 
-def is_kinked(ds):
+def is_kinked(ds, thresh=ANGLE_THRESH):
     angles = turning_angles(ds)
-    return bool(angles) and max(angles) > ANGLE_THRESH
+    if not angles:
+        return False
+    return max(angles) > thresh
 
 
-def kink_count(ds):
-    return sum(1 for a in turning_angles(ds) if a > KINK_THRESH)
+def max_angle(ds):
+    angles = turning_angles(ds)
+    return max(angles) if angles else 0.0
+
+def kink_count(ds, thresh=KINK_THRESH):
+    """Number of turning angles exceeding thresh."""
+    return sum(1 for a in turning_angles(ds) if a > thresh)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--lineformer', required=True,
-                        help='Path to the LineFormer repository root '
-                             '(must contain infer.py and lineformer_swin_t_config.py)')
-    parser.add_argument('--checkpoint', required=True,
-                        help='Path to the LineFormer checkpoint (.pth file)')
-    parser.add_argument('--input', default='lineformer_test',
-                        help='Directory of test figures (default: lineformer_test)')
-    parser.add_argument('--output', default='lineformer_results/quality_scores.csv',
-                        help='Output CSV path (default: lineformer_results/quality_scores.csv)')
-    parser.add_argument('--save-tracings', metavar='DIR', default=None,
-                        help='If given, save annotated tracing images to '
-                             'DIR/{color,bw,bw_solid}/ (required by make_pdf_overview.py)')
-    parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda'],
-                        help='Inference device (default: cpu)')
-    args = parser.parse_args()
-
-    sys.path.insert(0, args.lineformer)
-    import infer
-    if args.save_tracings:
-        import line_utils
-
-    config = os.path.join(args.lineformer, 'lineformer_swin_t_config.py')
-
-    print('Loading model...')
-    infer.load_model(config, args.checkpoint, args.device)
-    print('Model loaded.\n')
-
-    rows = []
-    for set_key in SETS:
-        for (stem, n_expected, overlap) in FIGURES:
-            img_path = os.path.join(args.input, set_key, stem + '.png')
-            if not os.path.exists(img_path):
-                print(f'MISSING: {img_path}')
-                continue
-
-            img = cv2.imread(img_path)
-            try:
-                dataseries = infer.get_dataseries(img, to_clean=False)
-            except Exception as e:
-                print(f'ERROR {set_key}/{stem}: {e}')
-                continue
-
-            n_detected     = len(dataseries)
-            kink_flags     = [is_kinked(ds) for ds in dataseries]
-            kink_counts    = [kink_count(ds) for ds in dataseries]
-            n_kinked       = sum(kink_flags)
-            total_kinks    = sum(kink_counts)
-            kinks_per_line = total_kinks / n_detected if n_detected > 0 else 0.0
-
-            rows.append({
-                'set':            set_key,
-                'figure':         stem + '.png',
-                'n_expected':     n_expected,
-                'overlap':        overlap,
-                'n_detected':     n_detected,
-                'n_kinked':       n_kinked,
-                'n_clean':        n_detected - n_kinked,
-                'total_kinks':    total_kinks,
-                'kinks_per_line': round(kinks_per_line, 2),
-            })
-            print(f'{set_key}/{stem}: detected={n_detected}, kinked={n_kinked}, '
-                  f'kinks_per_line={kinks_per_line:.2f}')
-
-            if args.save_tracings:
-                out_path = os.path.join(args.save_tracings, set_key, stem + '.png')
-                os.makedirs(os.path.dirname(out_path), exist_ok=True)
-                result = line_utils.draw_lines(
-                    img, line_utils.points_to_array(dataseries))
-                cv2.imwrite(out_path, result)
-
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, 'w', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=rows[0].keys())
-        w.writeheader()
-        w.writerows(rows)
-    print(f'\nSaved: {args.output}')
+def curvature_spike_ratio(ds):
+    """
+    Curvature Spike Ratio (CSR): max angular acceleration / median angular acceleration.
+    Angular acceleration aᵢ = |θᵢ₊₁ − θᵢ₋₁| / 2 at each interior angle.
+    Returns 1.0 if fewer than 3 angles (not enough data).
+    """
+    angles = turning_angles(ds)
+    if len(angles) < 3:
+        return 1.0
+    a = np.array(angles)
+    # discrete derivative of the angle sequence (central differences)
+    accel = np.abs(a[2:] - a[:-2]) / 2.0
+    if len(accel) == 0:
+        return 1.0
+    # epsilon=1.0 deg is the noise floor: prevents explosion for nearly-straight
+    # traces where median(accel) ≈ 0.
+    return float(np.max(accel) / (np.median(accel) + 1.0))
 
 
-if __name__ == '__main__':
-    main()
+rows = []
+for set_key in SETS:
+    for (stem, n_expected, overlap) in FIGURES:
+        json_path = os.path.join(TRACES_DIR, set_key, stem + '_traces.json')
+        if not os.path.exists(json_path):
+            print(f"MISSING: {json_path}")
+            continue
+
+        with open(json_path) as f:
+            dataseries = json.load(f)
+
+        n_detected  = len(dataseries)
+        kink_flags  = [is_kinked(ds) for ds in dataseries]
+        kink_counts = [kink_count(ds) for ds in dataseries]
+        csr_scores  = [curvature_spike_ratio(ds) for ds in dataseries]
+        n_kinked    = sum(kink_flags)
+        n_clean     = n_detected - n_kinked
+        total_kinks = sum(kink_counts)
+        kinks_per_line = total_kinks / n_detected if n_detected > 0 else 0.0
+        mean_csr    = float(np.mean(csr_scores)) if csr_scores else 0.0
+        max_csr     = float(np.max(csr_scores))  if csr_scores else 0.0
+
+        rows.append({
+            'set':             set_key,
+            'figure':          stem + '.png',
+            'n_expected':      n_expected,
+            'overlap':         overlap,
+            'n_detected':      n_detected,
+            'n_kinked':        n_kinked,
+            'n_clean':         n_clean,
+            'total_kinks':     total_kinks,
+            'kinks_per_line':  round(kinks_per_line, 2),
+            'mean_csr':        round(mean_csr, 2),
+            'max_csr':         round(max_csr, 2),
+        })
+        print(f"{set_key}/{stem}: detected={n_detected}, kinked={n_kinked}, "
+              f"kinks_per_line={kinks_per_line:.2f}, mean_csr={mean_csr:.1f}, max_csr={max_csr:.1f}")
+
+os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
+with open(OUTPUT_CSV, 'w', newline='') as f:
+    w = csv.DictWriter(f, fieldnames=rows[0].keys())
+    w.writeheader()
+    w.writerows(rows)
+
+print(f"\nSaved: {OUTPUT_CSV}")
