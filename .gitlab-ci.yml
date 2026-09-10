@@ -1,5 +1,7 @@
 pages:
   stage: deploy
+  tags:
+    - docker-runner
   script:
     - mkdir public
     - cp -r index.html js img public/
