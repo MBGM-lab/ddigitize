@@ -2,7 +2,7 @@
 
 A browser-based tool for extracting numerical data from scientific figures using smooth cubic Bézier curves. No installation required — runs entirely in the browser with all computation client-side.
 
-**[Launch app](https://gitr.sys.kth.se/pages/MBGM-lab/ddigitize/)**
+**[Launch app](https://gitr.sys.kth.se/pages/MBGM-lab/ddigitize/)** | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22687235.svg)](https://doi.org/10.5281/zenodo.22687235)
 
 ## Motivation
 
