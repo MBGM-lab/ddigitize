@@ -1,15 +1,57 @@
 # LineFormer — Analysis Pipeline
 
-This document describes the custom scripts added on top of the LineFormer codebase to run batch inference, assess trace quality, and generate manuscript figures.
+> **Note:** The scripts in this directory are copies from the ddigitize analysis workflow. They are **not** part of the LineFormer codebase itself and must be moved into a working LineFormer installation before they can be run. See [Setup](#setup) below.
+
+This document describes the custom scripts used to run batch inference with LineFormer, assess trace quality, and generate the manuscript figures comparing LineFormer against ddigitize.
 
 ---
 
-## Repository layout (relevant paths)
+## Setup
+
+### 1. Install LineFormer
+
+Clone the official LineFormer repository and set up its conda environment:
+
+```bash
+git clone https://github.com/TheJaeLal/LineFormer.git
+cd LineFormer
+
+conda create -n LineFormer python=3.8
+conda activate LineFormer
+bash install.sh
+```
+
+> LineFormer requires **PyTorch 1.13.1** and **CUDA 11.7** (or run on CPU). The `install.sh` script installs mmdetection and all other dependencies.
+
+### 2. Download the model weights
+
+Download `iter_3000.pth` from the [LineFormer model checkpoint](https://drive.google.com/drive/folders/1K_zLZwgoUIAJtfjwfCU5Nv33k17R0O5T?usp=sharing) and place it in the root of the `LineFormer/` directory alongside `lineformer_swin_t_config.py`.
+
+### 3. Copy the analysis scripts
+
+Copy all scripts from this directory (`ddigitize/lineformer_comparison/`) into the root of your `LineFormer/` installation:
+
+```bash
+cp ddigitize/lineformer_comparison/*.py LineFormer/
+```
+
+### 4. Create the required directories
+
+The scripts expect the following layout relative to `LineFormer/`:
 
 ```
-LineFormer/                   ← this repo (model code + analysis scripts)
+LineFormer/                   ← run all scripts from here
   iter_3000.pth               ← trained model weights
   lineformer_swin_t_config.py ← model config
+  run_batch.py                ← copied from this directory
+  run_batch_black.py
+  run_quality.py
+  make_quality_heatmap.py
+  make_quality_plot.py
+  make_kink_figure.py
+  show_kink.py
+  show_csr_transitions.py
+  make_comparison_pdf.py
 
 lineformer_test/              ← test images (input, read-only)
   bw/                         ← black-and-white dashed-line figures
@@ -17,38 +59,28 @@ lineformer_test/              ← test images (input, read-only)
   color/                      ← colour figures
   example_data/               ← real example figures (dose-response, ephys, timeseries)
 
-lineformer_results/           ← colored-trace output + quality CSV + figures
-  bw/ bw_solid/ color/        ← traced PNGs with coloured lines
-  quality_scores.csv
-  quality_scatter.png
-  kink_detection_figure.png
-  csr_validation.png
-  csr_transitions_*.png
-
+lineformer_results/           ← coloured-trace output + quality CSV + figures
 lineformer_results_black/     ← black-trace output + JSON trace data
-  bw/ bw_solid/ color/
-    *.png                     ← original image with black traced lines
-    *_traces.json             ← raw {x, y} coordinates for every detected trace
 ```
 
-All paths above are hardcoded in the scripts. Edit the constants at the top of each script if your layout differs.
+Create the output directories:
+
+```bash
+mkdir -p lineformer_results/{bw,bw_solid,color}
+mkdir -p lineformer_results_black/{bw,bw_solid,color}
+```
+
+All paths are hardcoded in the scripts. Edit the constants at the top of each script if your layout differs.
 
 ---
 
 ## Environment
 
-All scripts must be run with the **LineFormer conda environment**, which provides PyTorch, mmcv, and mmdet:
+All scripts must be run with the **LineFormer conda environment** and from inside the `LineFormer/` directory so that local imports (`infer`, `line_utils`) resolve correctly:
 
 ```bash
 conda activate LineFormer
-# or use the full path:
-/home/robert/miniconda3/envs/LineFormer/bin/python <script>.py
-```
-
-Run every script from inside the `LineFormer/` directory so that local imports (`infer`, `line_utils`) resolve correctly:
-
-```bash
-cd /home/HDD-drive/Repos/LineFormer
+cd /path/to/LineFormer
 ```
 
 ---
@@ -65,13 +97,13 @@ The trace *ordering* within a figure (which line gets index 0, 1, …) can vary 
 
 ### 1. Batch inference — coloured lines
 
-Runs LineFormer on every image in `lineformer_test/` (recursive glob) and draws each detected trace in a distinct colour. Output goes to `lineformer_results/`.
+Runs LineFormer on every image in `lineformer_test/` and draws each detected trace in a distinct colour. Output goes to `lineformer_results/`.
 
 ```bash
 python run_batch.py
 ```
 
-> **Note:** This script uses a recursive glob and will process sub-directories too (e.g. `example_data/split/`). Keep `lineformer_test/` clean of already-traced images to avoid accidental double-tracing.
+> **Note:** This script uses a recursive glob and will process sub-directories too. Keep `lineformer_test/` clean of already-traced images to avoid accidental double-tracing.
 
 Output: `lineformer_results/<set>/<stem>.png`
 
@@ -101,7 +133,7 @@ Loads the pre-computed JSON trace files from Step 2 and computes two quality met
 | Metric | Description |
 |--------|-------------|
 | **Kink count** | Number of turning angles > 45° along a trace (subsampled every 10 px). A stitched trace that jumps between two underlying curves often shows a sharp kink. |
-| **Curvature Spike Ratio (CSR)** | `max(|θᵢ₊₁ − θᵢ₋₁| / 2) / (median + 1°)`. Measures whether one location along the trace has an unusually abrupt change in curvature. The ε = 1° noise floor prevents division-by-near-zero for straight-line traces. Smooth curves yield CSR ≈ 1–5; stitched traces yield CSR >> 6. |
+| **Curvature Spike Ratio (CSR)** | `max(|θᵢ₊₁ − θᵢ₋₁| / 2) / (median + 1°)`. Measures whether one location along the trace has an unusually abrupt change in curvature. Smooth curves yield CSR ≈ 1–5; stitched traces yield CSR >> 6. |
 
 ```bash
 python run_quality.py
@@ -117,7 +149,7 @@ Columns: `set, figure, n_expected, overlap, n_detected, n_kinked, n_clean, total
 
 ### 4. Quality heatmap (main manuscript figure)
 
-Reads `quality_scores.csv` and produces the three-panel heatmap used in the manuscript (`figure_LineFormer_results`). Each cell shows kinked/detected traces and kinks-per-line, coloured by severity.
+Reads `quality_scores.csv` and produces the three-panel heatmap used in the manuscript.
 
 ```bash
 python make_quality_heatmap.py
@@ -125,13 +157,9 @@ python make_quality_heatmap.py
 
 Output: `lineformer_results/quality_heatmap.png`
 
-> Adapted from `ddigitize/lineformer_comparison/make_quality_plot.py`.
-
 ---
 
 ### 5. Quality scatter plot (CSR vs kink count)
-
-Reads `quality_scores.csv` and produces a scatter plot of kinks-per-line (x) vs mean CSR (y), with colour encoding overlap level and marker shape encoding figure set.
 
 ```bash
 python make_quality_plot.py
@@ -143,86 +171,35 @@ Output: `lineformer_results/quality_scatter.png`
 
 ## Manuscript figures
 
-The following scripts generate individual figures for the manuscript. They can be run independently (Steps 1–3 are not prerequisites unless noted).
-
-### Kink detection illustration
-
-Generates a three-panel synthetic figure illustrating how kink detection works.
+The following scripts generate individual figures. They can be run independently (Steps 1–3 are not prerequisites unless noted).
 
 ```bash
-python make_kink_figure.py
+python make_kink_figure.py        # kink detection illustration
+python show_kink.py               # CSR validation on synthetic traces
+python show_csr_transitions.py    # CSR transition point visualisation (edit FIGURE_SET/FIGURE_STEM at top)
+python make_comparison_pdf.py     # supplementary comparison PDF (requires example_data/)
 ```
-
-Output: `lineformer_results/kink_detection_figure.png`
-
----
-
-### CSR validation on synthetic traces
-
-Compares kink count vs CSR on five synthetic traces (two smooth, three stitched at different angles). Useful for sanity-checking the CSR threshold.
-
-```bash
-python show_kink.py
-```
-
-Output: `lineformer_results/csr_validation.png`
-
----
-
-### CSR transition point visualisation
-
-Runs LineFormer on one chosen figure and marks where the maximum-CSR transition occurs (red ×) and where endpoint turning angles exceed the threshold (orange ×). Edit `FIGURE_SET` and `FIGURE_STEM` at the top of the script to choose a different figure.
-
-```bash
-python show_csr_transitions.py
-```
-
-Output: `lineformer_results/csr_transitions_<set>_<stem>.png`
-
-This script re-runs inference directly (it does not use the cached JSON).
-
----
-
-### Example data comparison PDF
-
-Builds the supplementary PDF (`S1_example_data_and_usage.pdf`) comparing original figures with LineFormer tracings. Source images and traced results must be present under the `Manuscript/Figures/example_data/` tree.
-
-```bash
-python make_comparison_pdf.py
-```
-
-Output: `Bezier_curve_and_svgpathtool/App/Manuscript/S1_example_data_and_usage.pdf`
 
 ---
 
 ## Reproducing everything from scratch
 
 ```bash
-cd /home/HDD-drive/Repos/LineFormer
+conda activate LineFormer
+cd /path/to/LineFormer
 
-# 1. Coloured tracings (optional, for visual inspection)
-python run_batch.py
-
-# 2. Black tracings + JSON trace data
-python run_batch_black.py
-
-# 3. Quality scores
-python run_quality.py
-
-# 4. Quality heatmap (main manuscript figure)
-python make_quality_heatmap.py
-
-# 5. Quality scatter plot (CSR vs kink count)
-python make_quality_plot.py
-
-# Manuscript figures (independent)
+python run_batch.py               # 1. coloured tracings (optional)
+python run_batch_black.py         # 2. black tracings + JSON
+python run_quality.py             # 3. quality scores
+python make_quality_heatmap.py    # 4. main manuscript figure
+python make_quality_plot.py       # 5. scatter plot
 python make_kink_figure.py
 python show_kink.py
-python show_csr_transitions.py   # edit FIGURE_SET/FIGURE_STEM as desired
+python show_csr_transitions.py
 python make_comparison_pdf.py
 ```
 
-Expected runtime on CPU: ~2–5 minutes per batch script (45 figures × ~3 s/figure). Quality analysis and plot generation are near-instant (reads JSON, no inference).
+Expected runtime on CPU: ~2–5 minutes per batch script (45 figures × ~3 s/figure). Quality analysis and plot generation are near-instant.
 
 ---
 
