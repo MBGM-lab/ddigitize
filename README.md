@@ -2,15 +2,15 @@
 
 A browser-based tool for extracting numerical data from scientific figures using smooth cubic Bézier curves. No installation required — runs entirely in the browser with all computation client-side.
 
-**[Launch app](https://gitr.sys.kth.se/pages/MBGM-lab/ddigitize/)** | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22687235.svg)](https://doi.org/10.5281/zenodo.22687235)
+**[Launch app](https://MBGM-lab.github.io/ddigitize/)** | [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22687235.svg)](https://doi.org/10.5281/zenodo.22687235)
 
 ## Motivation
 
-A large volume of scientific data exists only as graphs in published literature. Most existing digitization tools recover discrete summary statistics or piecewise-linear point sequences. **ddigitize** instead represents curves as $C^1$-continuous cubic Bézier chains: users place a few anchor points and the tool fits a smooth, kink-free curve through them, which can be fine-tuned interactively.
+A large volume of scientific data exists only as graphs in published literature. Most existing digitization tools recover discrete summary statistics or piecewise-linear point sequences. **ddigitize** instead represents curves as smooth cubic Bézier chains: users place a few anchor points and the tool fits a smooth, kink-free curve through them, which can be fine-tuned interactively.
 
 ## Features
 
-- **Bézier-based fitting** — smooth $C^1$-continuous curves from sparse anchor points; automatic image-constrained refinement
+- **Bézier-based fitting** — smooth curves from sparse anchor points; automatic image-constrained refinement
 - **Multi-path support** — extract several named traces from the same figure simultaneously
 - **Coordinate calibration** — define real-world axes from reference points; live coordinate readout during placement
 - **Precision cursor mode** (`f`) — crosshair at 0.2× mouse speed with sub-pixel arrow-key nudging
