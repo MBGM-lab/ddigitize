@@ -4,9 +4,6 @@ With an image loaded and the calibration panel closed, left-click anywhere on th
 to place an anchor point on the active path. Points are shown as filled circles (corner
 anchors as squares — see below). At least two points are required before curve fitting.
 
-A hint overlay on the canvas indicates the minimum point count required for the selected
-curve model (see [Parametric curve models](curve-fitting.md#parametric-curve-models)).
-
 ## Removing a point
 
 `Alt+Click` near any existing anchor point removes it. If the path has already been
@@ -23,7 +20,7 @@ region without re-fitting the whole path.
 ## Corner anchors
 
 Press `c` after placing an anchor to mark it as a **corner anchor** (shown as a square).
-Corner anchors break $C^1$ continuity by design — the curve is free to have a sharp
+Corner anchors break smoothness by design — the curve is free to have a sharp
 change of direction at that point.
 
 When `c` is pressed:

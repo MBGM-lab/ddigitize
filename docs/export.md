@@ -20,7 +20,7 @@ keys:
 
 Each element of `curves` is one path object. The keys present depend on the path type.
 
-### Free-form smooth path (`line_type: "smooth"`, no parametric model)
+### Smooth path (`line_type: "smooth"`)
 
 ```json
 {
@@ -34,24 +34,6 @@ Each element of `curves` is one path object. The keys present depend on the path
                         "symmetric": true,
                         "handleIn": null, "handleOut": null }, ... ],
   "pixel_segments": [ [P0, B1, B2, P3], ... ]
-}
-```
-
-### Parametric-model path (`line_type: "smooth"` with a model selected)
-
-```json
-{
-  "name":               "Path 2",
-  "color":              "#0000ff",
-  "line_type":          "smooth",
-  "num_points":         6,
-  "model_params":       { "model": "single_exp", "A": ..., "tau": ..., ... },
-  "xy_values":          { "x": [...], "y": [...] },
-  "bezier_from_clicks": "M x y C ...",
-  "pixel_points":       [ { "x": ..., "y": ..., "corner": false,
-                            "symmetric": true,
-                            "handleIn": null, "handleOut": null }, ... ],
-  "pixel_segments":     [ [P0, B1, B2, P3], ... ]
 }
 ```
 
@@ -79,25 +61,13 @@ Each element of `curves` is one path object. The keys present depend on the path
 
 **`xy_values`**
 : Sampled $(x, y)$ in calibrated units (or raw image pixels if no calibration is set).
-  Smooth free-form paths: 50 samples per Bézier segment. Parametric paths: 200 samples
-  from the fitted model. Straight and unprocessed paths: one entry per anchor.
+  Smooth paths: 50 samples per Bézier segment. Straight and unprocessed paths: one entry per anchor.
 
 **`bezier_path`**
 : SVG cubic Bézier path string in calibrated real-unit space
   (`M x y C b1x b1y b2x b2y ex ey ...`). Present only for free-form smooth paths.
   Encodes the fitted control points and allows exact curve reconstruction in any
   SVG-capable tool.
-
-**`model_params`**
-: Fitted parametric model parameters in calibrated units. The `model` subkey names the
-  model (`"single_exp"`, `"double_exp"`, etc.); the remaining subkeys are the
-  model-specific parameters (e.g. `A`, `tau`). Present only when a parametric model was
-  selected.
-
-**`bezier_from_clicks`**
-: SVG Bézier path through the anchor points in calibrated units (one segment per gap
-  between anchors). Present only for parametric-model paths. Captures the anchor
-  placement shape independently of the model fit.
 
 **`pixel_points`**
 : Anchor positions in raw image-pixel coordinates. Each entry is an object with at
@@ -116,10 +86,9 @@ Each element of `curves` is one path object. The keys present depend on the path
 ## CSV export
 
 Click **CSV** to download a flat table with columns:
-`path_id`, `name`, `color`, `model`, `x`, `y`.
+`path_id`, `name`, `color`, `x`, `y`.
 
-One row per sampled point; paths are concatenated in order. The `model` column is blank
-for free-form and straight-line paths.
+One row per sampled point; paths are concatenated in order.
 
 ## Export warnings
 
