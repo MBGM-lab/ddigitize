@@ -1,0 +1,64 @@
+site_name: ddigitize User Manual
+site_description: Technical reference for all features of ddigitize — a browser-based tool for extracting numerical data from scientific figures.
+site_author: Robert Lindroos
+repo_url: https://github.com/MBGM-lab/ddigitize
+repo_name: MBGM-lab/ddigitize
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+
+nav:
+  - Overview: index.md
+  - Keyboard Shortcuts: shortcuts.md
+  - Tips and Best Practices: tips.md
+  - Image Loading: image-loading.md
+  - Canvas Navigation: canvas-navigation.md
+  - Coordinate System Calibration: calibration.md
+  - Paths: paths.md
+  - Placing Anchor Points: placing-anchors.md
+  - Curve Fitting: curve-fitting.md
+  - Editing Control Handles: editing-handles.md
+  - Extending a Path: extending.md
+  - Precision Placement: precision.md
+  - Undo and Redo: undo-redo.md
+  - Data Export: export.md
+  - Session Persistence: session.md
