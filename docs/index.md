@@ -2,7 +2,7 @@
 
 *ddigitize* is a browser-based tool for extracting numerical data from scientific
 images. Users place a small number of anchor points along a curve of interest;
-the tool fits a smooth, $C^1$-continuous cubic Bézier chain through those points
+the tool fits a smooth cubic Bézier chain through those points
 and optionally refines it to hug the underlying image trace.
 
 No installation is required. The application runs entirely in the browser and

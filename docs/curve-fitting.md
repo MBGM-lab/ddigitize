@@ -5,7 +5,7 @@
 Click **Smooth Curves** in the toolbar after placing at least two anchor points. The tool:
 
 1. Computes initial Bézier control points from a Catmull-Rom-inspired formula, ensuring
-   $C^1$-continuous (kink-free) transitions at every smooth anchor.
+   smooth, kink-free transitions at every anchor.
 2. Automatically runs [image fitting](#automatic-image-fitting) to snap the curve to the
    underlying trace in the image.
 
